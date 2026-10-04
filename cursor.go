@@ -4,7 +4,7 @@ import (
 	"errors"
 	"image"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 // Cursor describes the mouse cursor image. You can use a pre-defined Cursor...

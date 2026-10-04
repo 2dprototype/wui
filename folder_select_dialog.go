@@ -3,7 +3,7 @@ package wui
 import (
 	"syscall"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 type FolderSelectDialog struct {

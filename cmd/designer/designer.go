@@ -16,7 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 	"github.com/2dprototype/wui"
 )
 

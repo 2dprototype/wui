@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 // Icon holds a window icon. You can use a pre-defined Icon... variable (see

@@ -4,7 +4,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 // TODO Typing + or - into an IntUpDown shows an error. The same might be true

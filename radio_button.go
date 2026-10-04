@@ -1,6 +1,6 @@
 package wui
 
-import "github.com/gonutz/w32/v2"
+import "github.com/2dprototype/wui/w32"
 
 // TODO: We can create two radio buttons both set to checked and only later add
 // them both to their parents. This will keep them both checked, SetChecked only

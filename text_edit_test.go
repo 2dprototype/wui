@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gonutz/check"
+	"github.com/2dprototype/wui/check"
 )
 
 func extractCursor(s string) (string, int) {

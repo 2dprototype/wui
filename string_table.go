@@ -4,7 +4,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 func NewStringTable(header1 string, headers ...string) *StringTable {

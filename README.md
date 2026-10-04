@@ -10,6 +10,33 @@ This project is based on the excellent work by [gonutz](https://github.com/gonut
 
 Original library: [github.com/gonutz/wui](https://github.com/gonutz/wui)
 
+## Self-contained
+
+The former third-party packages are now part of this module, so there are no
+external dependencies and no network access is needed to build:
+
+- `github.com/2dprototype/wui/w32` (Win32 bindings, from gonutz/w32 v2, extended)
+- `github.com/2dprototype/wui/check` (test helper, from gonutz/check)
+
+## New Controls
+
+- `GroupBox` - captioned frame for visually grouping controls
+- `TabControl` - tab headers with `SetOnChange`; show/hide `Panel`s per tab (use `ContentBounds()` to place them)
+- `StatusBar` - bottom status bar, optional multiple parts via `SetParts` / `SetPartText`
+- `Window.AddTimer(ms, f)` - periodic `Timer` running on the GUI thread (`Start`, `Stop`, `SetInterval`)
+- `DatePicker` - date / long date / time chooser with `Value`, `SetValue`, `SetOnChange`
+- `ColorDialog` - system color chooser (`SetColor`, `Execute(parent)`, `Color`)
+- `ClipboardText()` / `SetClipboardText(text)` - read and write unicode text on the clipboard
+
+## Centering Windows
+
+- `window.SetCenterOnShow(true)` - centers on the screen when shown with `Show`, and over the parent window when shown with `ShowModal`
+- `window.Center()`, `window.CenterOnScreen()`, `window.CenterOnParent()` - center at any time
+
+## Examples
+
+The `examples` folder has one small program for each new feature: `group_box`, `tab_control`, `status_bar`, `timer`, `center_window`, `clipboard`, `color_dialog` and `date_picker`. Run one with `go run ./examples/timer`.
+
 ## Minimal Example
 
 This is all the code you need to create a window (which does not do much):

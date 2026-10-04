@@ -1,6 +1,6 @@
 package wui
 
-import "github.com/gonutz/w32/v2"
+import "github.com/2dprototype/wui/w32"
 
 func NewSlider() *Slider {
 	return &Slider{

@@ -9,7 +9,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
-	"github.com/gonutz/w32/v2"
+	"github.com/2dprototype/wui/w32"
 )
 
 var windows windowStack
@@ -124,6 +124,8 @@ type Window struct {
 	onChar           func(r rune)
 	onResize         func()
 	onMessage        MessageCallback
+	timers           []*Timer
+	centerOnShow     bool
 }
 
 func (w *Window) Children() []Control {
@@ -882,6 +884,10 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 				}
 			}
 		}
+	case w32.WM_TIMER:
+		if w.onTimer(wParam) {
+			return 0
+		}
 	case w32.WM_DESTROY:
 		w32.PostQuitMessage(0)
 		return 0
@@ -995,8 +1001,13 @@ func (w *Window) Show() error {
 
 	w.updateAccelerators()
 	w.lastInnerWidth, w.lastInnerHeight = w.InnerSize()
+	initCommonControls()
 	w.createContents()
 	w.applyIcon()
+	w.startTimers()
+	if w.centerOnShow {
+		w.Center()
+	}
 	w32.ShowWindow(window, state.toCmd())
 	w.readBounds()
 	if w.onShow != nil {
@@ -1106,7 +1117,15 @@ func (w *Window) onWM_COMMAND(wParam, lParam uintptr) {
 
 func (w *Window) onWM_NOTIFY(wParam, lParam uintptr) {
 	header := *((*w32.NMHDR)(unsafe.Pointer(lParam)))
-	if header.Code == uint32(w32.UDN_DELTAPOS) {
+	if header.Code == w32.DTN_DATETIMECHANGE {
+		if d, ok := findControlByHandle(w.children, uintptr(header.HwndFrom)).(*DatePicker); ok {
+			d.notify()
+		}
+	} else if header.Code == w32.TCN_SELCHANGE {
+		if t, ok := findControlByHandle(w.children, uintptr(header.HwndFrom)).(*TabControl); ok {
+			t.notify(header.Code)
+		}
+	} else if header.Code == uint32(w32.UDN_DELTAPOS) {
 		i := int(wParam)
 		if 0 <= i && i < len(w.controls) {
 			if f, ok := w.controls[i].(*FloatUpDown); ok {
@@ -1266,8 +1285,13 @@ func (w *Window) ShowModal() error {
 
 	w.updateAccelerators()
 	w.lastInnerWidth, w.lastInnerHeight = w.InnerSize()
+	initCommonControls()
 	w.createContents()
 	w.applyIcon()
+	w.startTimers()
+	if w.centerOnShow {
+		w.Center()
+	}
 	w32.ShowWindow(window, state.toCmd())
 	w32.EnableWindow(w.parent.handle, false)
 	w.readBounds()

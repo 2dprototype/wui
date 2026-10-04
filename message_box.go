@@ -1,6 +1,6 @@
 package wui
 
-import "github.com/gonutz/w32/v2"
+import "github.com/2dprototype/wui/w32"
 
 func MessageBox(caption, text string) {
 	msgBox(caption, text, w32.MB_OK)

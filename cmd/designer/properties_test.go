@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/gonutz/check"
+	"github.com/2dprototype/wui/check"
 	"github.com/2dprototype/wui"
 )
 
