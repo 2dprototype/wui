@@ -79,6 +79,10 @@ type control struct {
 	hidden     bool
 	onResize   func()
 	onTabFocus func()
+
+	toolTip    string
+	toolTipWnd w32.HWND
+	popup      *PopupMenu
 }
 
 // closing defaults to nothing, the base control has no properties that are
@@ -86,6 +90,10 @@ type control struct {
 func (c *control) closing() {}
 
 func (c *control) destroy() {
+	if c.toolTipWnd != 0 {
+		w32.DestroyWindow(c.toolTipWnd)
+		c.toolTipWnd = 0
+	}
 	if c.handle != 0 {
 		w32.DestroyWindow(c.handle)
 		c.handle = 0
@@ -120,6 +128,7 @@ func (c *control) create(id int, exStyle uint, className string, style uint) {
 	if c.disabled {
 		w32.EnableWindow(c.handle, false)
 	}
+	c.applyToolTip()
 }
 
 func (c *control) parentFontChanged() {}

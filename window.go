@@ -126,6 +126,7 @@ type Window struct {
 	onMessage        MessageCallback
 	timers           []*Timer
 	centerOnShow     bool
+	contextMenu      *PopupMenu
 }
 
 func (w *Window) Children() []Control {
@@ -884,6 +885,11 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 				}
 			}
 		}
+	case w32.WM_CONTEXTMENU:
+		if w.handleContextMenu(wParam, lParam) {
+			return 0
+		}
+		return w32.DefWindowProc(window, msg, wParam, lParam)
 	case w32.WM_TIMER:
 		if w.onTimer(wParam) {
 			return 0
@@ -1147,6 +1153,8 @@ func (w *Window) onWM_NOTIFY(wParam, lParam uintptr) {
 				}
 			}
 		}
+	} else if t, ok := findControlByHandle(w.children, uintptr(header.HwndFrom)).(*TreeView); ok {
+		t.notify(header.Code)
 	}
 }
 

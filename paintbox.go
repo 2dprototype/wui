@@ -20,6 +20,10 @@ type PaintBox struct {
 	backBuffer  backBuffer
 	onPaint     func(*Canvas)
 	onMouseMove func(x, y int)
+	onMouseDown func(x, y int, button MouseButton)
+	onMouseUp   func(x, y int, button MouseButton)
+	onDoubleClick func(x, y int, button MouseButton)
+	dragging    bool
 }
 
 var _ Control = (*PaintBox)(nil)
@@ -52,6 +56,20 @@ func (b *backBuffer) setMinSize(hdc w32.HDC, w, h int) {
 	}
 }
 
+func (p *PaintBox) wantsMouseButtons() bool {
+	return p.onMouseDown != nil || p.onMouseUp != nil || p.onDoubleClick != nil
+}
+
+func mouseButtonOf(msg uint32) MouseButton {
+	switch msg {
+	case w32.WM_LBUTTONDOWN, w32.WM_LBUTTONUP, w32.WM_LBUTTONDBLCLK:
+		return MouseButtonLeft
+	case w32.WM_MBUTTONDOWN, w32.WM_MBUTTONUP, w32.WM_MBUTTONDBLCLK:
+		return MouseButtonMiddle
+	}
+	return MouseButtonRight
+}
+
 func (p *PaintBox) create(id int) {
 	p.control.create(id, 0, "STATIC", w32.SS_OWNERDRAW)
 	w32.SetWindowSubclass(p.handle, syscall.NewCallback(func(
@@ -69,9 +87,81 @@ func (p *PaintBox) create(id int) {
 				x, y, _ = w32.ScreenToClient(p.handle, x, y)
 				p.onMouseMove(x, y)
 			}
+			if p.wantsMouseButtons() {
+				return w32.HTCLIENT
+			}
+		case w32.WM_MOUSEMOVE:
+			// While a mouse button is held the PaintBox captures the mouse, so
+			// move events outside of it are reported here.
+			if p.dragging && p.onMouseMove != nil {
+				x := int(int16(lParam & 0xFFFF))
+				y := int(int16((lParam >> 16) & 0xFFFF))
+				p.onMouseMove(x, y)
+			}
+		case w32.WM_CAPTURECHANGED:
+			p.dragging = false
+		case w32.WM_LBUTTONDOWN, w32.WM_MBUTTONDOWN, w32.WM_RBUTTONDOWN:
+			x := int(int16(lParam & 0xFFFF))
+			y := int(int16((lParam >> 16) & 0xFFFF))
+			p.dragging = true
+			w32.SetCapture(p.handle)
+			if p.onMouseDown != nil {
+				p.onMouseDown(x, y, mouseButtonOf(msg))
+			}
+			return 0
+		case w32.WM_LBUTTONDBLCLK, w32.WM_MBUTTONDBLCLK, w32.WM_RBUTTONDBLCLK:
+			x := int(int16(lParam & 0xFFFF))
+			y := int(int16((lParam >> 16) & 0xFFFF))
+			p.dragging = true
+			w32.SetCapture(p.handle)
+			if p.onDoubleClick != nil {
+				p.onDoubleClick(x, y, mouseButtonOf(msg))
+			} else if p.onMouseDown != nil {
+				p.onMouseDown(x, y, mouseButtonOf(msg))
+			}
+			return 0
+		case w32.WM_LBUTTONUP, w32.WM_MBUTTONUP, w32.WM_RBUTTONUP:
+			x := int(int16(lParam & 0xFFFF))
+			y := int(int16((lParam >> 16) & 0xFFFF))
+			p.dragging = false
+			w32.ReleaseCapture()
+			if p.onMouseUp != nil {
+				p.onMouseUp(x, y, mouseButtonOf(msg))
+			}
 		}
 		return w32.DefSubclassProc(window, msg, wParam, lParam)
 	}), 0, 0)
+	p.applyToolTip()
+}
+
+// SetOnMouseDown sets the function called when a mouse button is pressed in the
+// PaintBox. While the button is held, mouse move events keep coming even when
+// the mouse leaves the PaintBox, so dragging works.
+func (p *PaintBox) SetOnMouseDown(f func(x, y int, button MouseButton)) {
+	p.onMouseDown = f
+}
+
+func (p *PaintBox) OnMouseDown() func(x, y int, button MouseButton) {
+	return p.onMouseDown
+}
+
+// SetOnMouseUp sets the function called when a mouse button is released.
+func (p *PaintBox) SetOnMouseUp(f func(x, y int, button MouseButton)) {
+	p.onMouseUp = f
+}
+
+func (p *PaintBox) OnMouseUp() func(x, y int, button MouseButton) {
+	return p.onMouseUp
+}
+
+// SetOnDoubleClick sets the function called on a double click. Without it a
+// double click is reported as a second mouse down.
+func (p *PaintBox) SetOnDoubleClick(f func(x, y int, button MouseButton)) {
+	p.onDoubleClick = f
+}
+
+func (p *PaintBox) OnDoubleClick() func(x, y int, button MouseButton) {
+	return p.onDoubleClick
 }
 
 func (p *PaintBox) OnMouseMove() func(x, y int) {
@@ -101,6 +191,8 @@ type Canvas struct {
 	width   int
 	height  int
 	regions []w32.HRGN
+	stroke  Stroke
+	states  []canvasState
 }
 
 // Handle returns the handle to the canvas' device context (HDC).
@@ -152,8 +244,7 @@ func (c *Canvas) ClearDrawRegions() {
 }
 
 func (c *Canvas) DrawRect(x, y, width, height int, color Color) {
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	w32.SelectObject(c.hdc, w32.GetStockObject(w32.NULL_BRUSH))
 	w32.Rectangle(c.hdc, x, y, x+width, y+height)
 }
@@ -167,15 +258,13 @@ func (c *Canvas) FillRect(x, y, width, height int, color Color) {
 }
 
 func (c *Canvas) Line(x1, y1, x2, y2 int, color Color) {
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	w32.MoveToEx(c.hdc, x1, y1, nil)
 	w32.LineTo(c.hdc, x2, y2)
 }
 
 func (c *Canvas) DrawEllipse(x, y, width, height int, color Color) {
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	w32.SelectObject(c.hdc, w32.GetStockObject(w32.NULL_BRUSH))
 	w32.Ellipse(c.hdc, x, y, x+width, y+height)
 }
@@ -196,8 +285,7 @@ func (c *Canvas) Polyline(p []Point, color Color) {
 	if len(p) < 2 {
 		return
 	}
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	w32.SelectObject(c.hdc, w32.GetStockObject(w32.NULL_BRUSH))
 	w32.PolylineMem(c.hdc, unsafe.Pointer(&p[0]), len(p))
 }
@@ -214,8 +302,7 @@ func (c *Canvas) Polygon(p []Point, color Color) {
 }
 
 func (c *Canvas) Arc(x, y, width, height int, fromClockAngle, dAngle float64, color Color) {
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	c.arcLike(x, y, width, height, fromClockAngle, dAngle, w32.Arc)
 }
 
@@ -228,8 +315,7 @@ func (c *Canvas) FillPie(x, y, width, height int, fromClockAngle, dAngle float64
 }
 
 func (c *Canvas) DrawPie(x, y, width, height int, fromClockAngle, dAngle float64, color Color) {
-	w32.SelectObject(c.hdc, w32.GetStockObject(w32.DC_PEN))
-	w32.SetDCPenColor(c.hdc, w32.COLORREF(color))
+	defer c.usePen(color)()
 	w32.SelectObject(c.hdc, w32.GetStockObject(w32.NULL_BRUSH))
 	c.arcLike(x, y, width, height, fromClockAngle, dAngle, w32.Pie)
 }

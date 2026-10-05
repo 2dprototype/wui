@@ -35,7 +35,30 @@ external dependencies and no network access is needed to build:
 
 ## Examples
 
-The `examples` folder has one small program for each new feature: `group_box`, `tab_control`, `status_bar`, `timer`, `center_window`, `clipboard`, `color_dialog` and `date_picker`. Run one with `go run ./examples/timer`.
+The `examples` folder has one small program for each new feature: `group_box`, `tab_control`, `status_bar`, `timer`, `center_window`, `clipboard`, `color_dialog`, `date_picker`, `canvas_drawing`, `canvas_mouse`, `tree_view`, `context_menu`, `tooltip` and `toolbar`. Run one with `go run ./examples/timer`.
+
+## Canvas Drawing (PaintBox)
+
+New `Canvas` functions, all work inside `PaintBox.SetOnPaint`:
+
+- **Strokes**: `SetStroke(wui.Stroke{Width, Style, Cap, Join})`, `SetLineWidth`, `SetLineStyle` - width, dash styles (`LineDash`, `LineDot`, ...), round/square/flat caps, round/bevel/miter joins. They apply to every outline function (`Line`, `DrawRect`, `DrawEllipse`, `Polyline`, `Arc`, `DrawPie`, ...)
+- **Shapes**: `DrawRoundRect`, `FillRoundRect`, `FillRoundRectOutline`, `FillRectOutline`, `FillEllipseOutline`, `DrawPolygon`, `FillPolygonOutline`, `Bezier`, `Curve` (smooth curve through points), `SetPixel`, `Pixel`, `DrawFocusRect`
+- **Helpers**: `RegularPolygonPoints` (triangle, hexagon, ...), `StarPoints`, `Clear`
+- **Fills**: `FillGradientH`, `FillGradientV`, `FillRectAlpha` (transparent fill)
+- **Images**: `DrawImageScaled` (stretch), `DrawImageAlpha` (transparency)
+- **Clipping**: `PushDrawEllipse`, `PushDrawRoundRect`, `PushDrawPolygon` (undo with `PopDrawRegion`)
+- **State**: `Save()` / `Restore()` for stroke, font and clip region
+- **Text**: `TextRectEllipsis` (cuts long text with "...")
+- **Mouse**: `PaintBox.SetOnMouseDown`, `SetOnMouseUp`, `SetOnDoubleClick` (with `MouseButton`); dragging keeps reporting `SetOnMouseMove` outside the box
+
+## More Controls and Features
+
+- `TreeView` / `TreeNode` - hierarchical list (`Add`, `Selected`, `SetOnSelect`, `SetOnDoubleClick`, `Expand`, `Collapse`, `ExpandAll`, `Remove`, `Tag`)
+- `PopupMenu` - context menus; `Window.SetContextMenu(menu)` and `control.SetContextMenu(menu)` open on right click, or call `menu.Show(window, x, y)`
+- `SetToolTip(text)` - hover hint, available on every control
+- `ToolBar` - `NewToolBar(parent, x, y, height)` with `AddButton` and `AddSeparator`
+
+New examples: `canvas_drawing`, `canvas_mouse`, `tree_view`, `context_menu`, `tooltip`, `toolbar`.
 
 ## Minimal Example
 
