@@ -16,6 +16,22 @@ const (
 	DatePickerTime
 )
 
+func (m DatePickerMode) String() string {
+	// NOTE that these strings are used in the designer to get their
+	// representations as Go code so they must always correspond to their
+	// constant names and be prefixed with the package name.
+	switch m {
+	case DatePickerShortDate:
+		return "wui.DatePickerShortDate"
+	case DatePickerLongDate:
+		return "wui.DatePickerLongDate"
+	case DatePickerTime:
+		return "wui.DatePickerTime"
+	default:
+		return "unknown DatePickerMode"
+	}
+}
+
 func NewDatePicker() *DatePicker {
 	return &DatePicker{value: time.Now()}
 }

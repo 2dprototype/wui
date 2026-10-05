@@ -48,6 +48,14 @@ func (r *RadioButton) create(id int) {
 	if r.checked {
 		w32.SendMessage(r.handle, w32.BM_SETCHECK, toCheckState(r.checked), 0)
 	}
+	r.themeForColor()
+}
+
+// SetTextColor changes the text color. Visual styles are switched off for this
+// radio button because themed radio buttons ignore the text color.
+func (r *RadioButton) SetTextColor(col Color) {
+	r.control.SetTextColor(col)
+	r.themeForColor()
 }
 
 // Checked returns true if the radio button is checked and false if not.

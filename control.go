@@ -83,6 +83,9 @@ type control struct {
 	toolTip    string
 	toolTipWnd w32.HWND
 	popup      *PopupMenu
+
+	onDropFiles DropFilesFunc
+	colorState
 }
 
 // closing defaults to nothing, the base control has no properties that are

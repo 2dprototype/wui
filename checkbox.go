@@ -33,6 +33,14 @@ func (*CheckBox) eatsTabs() bool {
 func (c *CheckBox) create(id int) {
 	c.textControl.create(id, 0, "BUTTON", w32.WS_TABSTOP|w32.BS_AUTOCHECKBOX)
 	w32.SendMessage(c.handle, w32.BM_SETCHECK, toCheckState(c.checked), 0)
+	c.themeForColor()
+}
+
+// SetTextColor changes the text color. Visual styles are switched off for this
+// check box because themed check boxes ignore the text color.
+func (c *CheckBox) SetTextColor(col Color) {
+	c.control.SetTextColor(col)
+	c.themeForColor()
 }
 
 func (c *CheckBox) Checked() bool {

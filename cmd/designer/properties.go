@@ -11,10 +11,31 @@ import (
 type property struct {
 	name     string
 	combines []string
+
+	// requires is the name of a bool getter. The property is only written to
+	// the generated Go code if that getter returns true.
+	requires string
+
+	// skipDefault leaves the property out of project files when it has its
+	// default value. Used for properties where setting a value, even the
+	// default, changes the behavior (colors).
+	skipDefault bool
 }
 
 func prop(name string, combines ...string) property {
 	return property{name: name, combines: combines}
+}
+
+// propIf is a property that is only generated if the bool getter requires
+// returns true.
+func propIf(name, requires string) property {
+	return property{name: name, requires: requires}
+}
+
+// propColor is a color property. Colors are only saved and generated when they
+// differ from the default.
+func propColor(name string) property {
+	return property{name: name, skipDefault: true}
 }
 
 func commonPropertiesPlus(plus ...property) []property {
@@ -57,6 +78,21 @@ var properties = map[interface{}][]property{
 		prop("HasBorder"),
 		prop("Resizable"),
 		prop("State"),
+		propColor("BackgroundColor"),
+		prop("TopMost"),
+		prop("ShowInTaskbar"),
+		prop("DragByBackground"),
+		prop("CornerRadius"),
+		prop("AcceptFiles"),
+		// The color comes before the switch: setting a color turns the
+		// transparency on, SetTransparent(false) turns it off again when a
+		// project is loaded.
+		propIf("TransparentColor", "Transparent"),
+		prop("Transparent"),
+		prop("TrayEnabled"),
+		prop("TrayToolTip"),
+		prop("MinimizeToTray"),
+		prop("CloseToTray"),
 	},
 
 	wui.NewButton(): commonPropertiesPlus(
@@ -66,16 +102,40 @@ var properties = map[interface{}][]property{
 	wui.NewLabel(): commonPropertiesPlus(
 		prop("Text"),
 		prop("Alignment"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
 	),
 
 	wui.NewCheckBox(): commonPropertiesPlus(
 		prop("Text"),
 		prop("Checked"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
 	),
 
 	wui.NewRadioButton(): commonPropertiesPlus(
 		prop("Text"),
 		prop("Checked"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
+	),
+
+	wui.NewGroupBox(): commonPropertiesPlus(
+		prop("Text"),
+		propColor("TextColor"),
+	),
+
+	wui.NewStatusBar(): commonPropertiesPlus(
+		prop("Text"),
+	),
+
+	wui.NewTabControl(): commonPropertiesPlus(
+		prop("Tabs"),
+		prop("SelectedIndex"),
+	),
+
+	wui.NewDatePicker(): commonPropertiesPlus(
+		prop("Mode"),
 	),
 
 	wui.NewSlider(): commonPropertiesPlus(
@@ -93,6 +153,7 @@ var properties = map[interface{}][]property{
 
 	wui.NewPanel(): commonPropertiesPlus(
 		prop("BorderStyle"),
+		propColor("BackgroundColor"),
 	),
 
 	wui.NewPaintBox(): commonPropertiesPlus(),
@@ -102,6 +163,8 @@ var properties = map[interface{}][]property{
 		prop("CharacterLimit"),
 		prop("IsPassword"),
 		prop("ReadOnly"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
 	),
 
 	wui.NewIntUpDown(): commonPropertiesPlus(
@@ -114,6 +177,8 @@ var properties = map[interface{}][]property{
 	wui.NewComboBox(): commonPropertiesPlus(
 		prop("Items"),
 		prop("SelectedIndex"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
 	),
 
 	wui.NewProgressBar(): commonPropertiesPlus(
@@ -135,6 +200,8 @@ var properties = map[interface{}][]property{
 		prop("WordWrap"),
 		prop("CharacterLimit"),
 		prop("WritesTabs"),
+		propColor("TextColor"),
+		propColor("BackgroundColor"),
 	),
 }
 
@@ -160,6 +227,11 @@ func genProps(variable string, c, def interface{}, props []property) []string {
 		}
 		if _, ok := control.Type().MethodByName(p.name); !ok {
 			panic(fmt.Sprintf("%v does not have method %v", control.Type(), p.name))
+		}
+		if p.requires != "" {
+			if !control.MethodByName(p.requires).Call(nil)[0].Bool() {
+				continue
+			}
 		}
 		ours := control.MethodByName(p.name).Call(nil)
 		defaults := reflect.ValueOf(def).MethodByName(p.name).Call(nil)
@@ -228,10 +300,44 @@ func toGo(args []reflect.Value) string {
 			}
 		case reflect.String:
 			s = fmt.Sprintf("%q", arg.String())
+		case reflect.Uint32:
+			if arg.Type() == reflect.TypeOf(wui.Color(0)) {
+				c := wui.Color(arg.Uint())
+				s = fmt.Sprintf("wui.RGB(%d, %d, %d)", c.R(), c.G(), c.B())
+			} else {
+				s = fmt.Sprint(arg)
+			}
 		default:
 			s = fmt.Sprint(arg)
 		}
 		asGo = append(asGo, s)
 	}
 	return strings.Join(asGo, ", ")
+}
+
+// hasDefaultValue reports whether the property has the same value on the
+// control and on the default instance of its type.
+func hasDefaultValue(control, def interface{}, name string) bool {
+	m := reflect.ValueOf(control).MethodByName(name)
+	d := reflect.ValueOf(def).MethodByName(name)
+	if !m.IsValid() || !d.IsValid() {
+		return false
+	}
+	return equal(m.Call(nil), d.Call(nil))
+}
+
+// isListedProperty returns true if the property is part of the property list
+// of the control's type.
+func isListedProperty(control interface{}, name string) bool {
+	for def, list := range properties {
+		if reflect.TypeOf(control) == reflect.TypeOf(def) {
+			for _, p := range list {
+				if p.name == name {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
 }

@@ -21,4 +21,12 @@ func (*GroupBox) eatsTabs() bool { return false }
 
 func (g *GroupBox) create(id int) {
 	g.textControl.create(id, 0, "BUTTON", w32.BS_GROUPBOX|w32.WS_CLIPSIBLINGS)
+	g.themeForColor()
+}
+
+// SetTextColor changes the caption color. Visual styles are switched off for
+// this group box because themed group boxes ignore the text color.
+func (g *GroupBox) SetTextColor(col Color) {
+	g.control.SetTextColor(col)
+	g.themeForColor()
 }

@@ -60,6 +60,17 @@ New `Canvas` functions, all work inside `PaintBox.SetOnPaint`:
 
 New examples: `canvas_drawing`, `canvas_mouse`, `tree_view`, `context_menu`, `tooltip`, `toolbar`.
 
+## Window Effects, Tray, Colors and Drag and Drop
+
+- **Drag and drop files**: `window.SetOnDropFiles(func(files []string, x, y int) {...})`, and the same `SetOnDropFiles` on any control (the innermost control under the mouse gets the files)
+- **Colored text**: `SetTextColor(color)` / `SetBackgroundColor(color)` (and `ResetTextColor`, `ResetBackgroundColor`) on `Label`, `CheckBox`, `RadioButton`, `GroupBox`, `EditLine`, `TextEdit`, `ComboBox` and the fill of a `Panel`. Check boxes, radio buttons and group boxes drop visual styles when a text color is set because themed controls ignore it
+- **System tray**: `NewTrayIcon()` with `SetToolTip`, `SetIcon`, `SetMenu(*PopupMenu)`, `SetOnClick`, `SetOnDoubleClick`, `ShowBalloon(title, text, kind)`; attach it with `window.SetTrayIcon(tray)`. `window.SetMinimizeToTray(true)`, `window.SetCloseToTray(true)`, `HideToTray`, `RestoreFromTray`, `Quit`. The icon comes back by itself when Explorer restarts
+- **Transparent window**: `SetAlpha(0..255)` for opacity, `SetTransparentColor(color)` / `SetTransparent(true)` for a color key (pixels in that color are see-through and click-through)
+- **Headless window**: `SetHeadless(true)` (no title bar and border) with `SetDragByBackground(true)` to move it, `SetCornerRadius(px)` for rounded corners
+- **More window options**: `SetTopMost`, `SetShowInTaskbar`, `SetMinSize`, `SetMaxSize`
+
+New examples: `drag_drop`, `tray`, `colored_text`, `overlay_window`.
+
 ## Minimal Example
 
 This is all the code you need to create a window (which does not do much):
@@ -87,7 +98,9 @@ A graphical designer tool is included for visually creating GUIs. It is located 
 - **Project Management**: Save and load designs as JSON project files
 - **Font Customization**: Configure fonts for individual controls
 - **Event Handling**: Define event handlers (OnPaint, etc.)
-- **Multiple Controls**: Button, Label, CheckBox, RadioButton, Slider, ProgressBar, EditLine, TextEdit, ComboBox, Panel, PaintBox, IntUpDown, FloatUpDown
+- **Multiple Controls**: Button, Label, CheckBox, RadioButton, Slider, ProgressBar, EditLine, TextEdit, ComboBox, Panel, PaintBox, IntUpDown, FloatUpDown, GroupBox, TabControl, DatePicker, StatusBar
+- **Full support for the new features**: color pickers for text/background/key color, window options (transparency, headless via Has Border, corner radius, top most, taskbar, drag move, tray, drop files), `OnClick` and `OnDropFiles` event editors, copy / cut / paste / duplicate
+- **Responsive**: works on small screens. The toolbox and the property panel hide automatically when the window is narrow (`F2` / `F3` toggle them, `F4` goes back to automatic), both scroll with the mouse wheel, the preview pans with the wheel (Shift for sideways) and project files can be dropped onto the designer to open them
 
 ### Keyboard Shortcuts
 
@@ -101,6 +114,9 @@ A graphical designer tool is included for visually creating GUIs. It is located 
 | `Ctrl+J` | Export as JSON |
 | `F5` | Run Preview |
 | `Del` | Delete Selected Control |
+| `Ctrl+D` | Duplicate selected control |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste control |
+| `F2` / `F3` / `F4` | Toggle toolbox / toggle properties / automatic layout |
 | `F1` | About |
 | `Ctrl+F1` | Keyboard Shortcuts Reference |
 

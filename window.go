@@ -127,6 +127,7 @@ type Window struct {
 	timers           []*Timer
 	centerOnShow     bool
 	contextMenu      *PopupMenu
+	ext              windowExt
 }
 
 func (w *Window) Children() []Control {
@@ -256,10 +257,17 @@ func (w *Window) style() uint {
 }
 
 func (w *Window) extendedStyle() uint {
-	if w.alpha != 255 {
-		return w32.WS_EX_LAYERED
+	var s uint
+	if w.alpha != 255 || w.ext.transparent {
+		s |= w32.WS_EX_LAYERED
 	}
-	return 0
+	if w.ext.topMost {
+		s |= w32.WS_EX_TOPMOST
+	}
+	if w.ext.hideFromTaskbar {
+		s |= w32.WS_EX_TOOLWINDOW
+	}
+	return s
 }
 
 func (w *Window) readBounds() {
@@ -705,7 +713,9 @@ func (w *Window) SetOnMessage(f MessageCallback) {
 
 func (w *Window) Close() {
 	if w.handle != 0 {
+		w.ext.programmaticClose = true
 		w32.SendMessage(w.handle, w32.WM_CLOSE, 0, 0)
+		w.ext.programmaticClose = false
 	}
 }
 
@@ -780,6 +790,10 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 		if handled {
 			return result
 		}
+	}
+
+	if r, handled := w.extMsg(window, msg, wParam, lParam); handled {
+		return r
 	}
 
 	mouseX := int(lParam & 0xFFFF)
@@ -890,6 +904,10 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 			return 0
 		}
 		return w32.DefWindowProc(window, msg, wParam, lParam)
+	case w32.WM_CTLCOLORSTATIC, w32.WM_CTLCOLOREDIT, w32.WM_CTLCOLORBTN, w32.WM_CTLCOLORLISTBOX:
+		if r, ok := ctlColor(w.children, w.background, msg, wParam, lParam); ok {
+			return r
+		}
 	case w32.WM_TIMER:
 		if w.onTimer(wParam) {
 			return 0
@@ -994,9 +1012,7 @@ func (w *Window) Show() error {
 		return errors.New("wui.Window.Show: CreateWindowEx failed")
 	}
 	w.handle = window
-	if w.alpha != 255 {
-		w32.SetLayeredWindowAttributes(w.handle, 0, w.alpha, w32.LWA_ALPHA)
-	}
+	w.applyLayered()
 	if w.hidesCloseButton {
 		w32.EnableMenuItem(
 			w32.GetSystemMenu(w.handle, false),
@@ -1011,6 +1027,7 @@ func (w *Window) Show() error {
 	w.createContents()
 	w.applyIcon()
 	w.startTimers()
+	w.extAfterCreate()
 	if w.centerOnShow {
 		w.Center()
 	}
@@ -1270,9 +1287,7 @@ func (w *Window) ShowModal() error {
 		return errors.New("wui.Window.ShowModal: CreateWindowEx failed")
 	}
 	w.handle = window
-	if w.alpha != 255 {
-		w32.SetLayeredWindowAttributes(w.handle, 0, w.alpha, w32.LWA_ALPHA)
-	}
+	w.applyLayered()
 	if w.hidesCloseButton {
 		w32.EnableMenuItem(
 			w32.GetSystemMenu(w.handle, false),
@@ -1297,6 +1312,7 @@ func (w *Window) ShowModal() error {
 	w.createContents()
 	w.applyIcon()
 	w.startTimers()
+	w.extAfterCreate()
 	if w.centerOnShow {
 		w.Center()
 	}
@@ -1352,36 +1368,7 @@ func (w *Window) Alpha() uint8 {
 
 func (w *Window) SetAlpha(a uint8) {
 	w.alpha = a
-	if w.handle != 0 {
-		style := w32.GetWindowLong(w.handle, w32.GWL_EXSTYLE)
-		if w.alpha != 255 {
-			if style&w32.WS_EX_LAYERED == 0 {
-				w32.SetWindowLong(
-					w.handle,
-					w32.GWL_EXSTYLE,
-					style|w32.WS_EX_LAYERED,
-				)
-			}
-			w32.SetLayeredWindowAttributes(
-				w.handle,
-				0,
-				w.alpha,
-				w32.LWA_ALPHA,
-			)
-		} else {
-			w32.SetWindowLong(
-				w.handle,
-				w32.GWL_EXSTYLE,
-				style & ^w32.WS_EX_LAYERED,
-			)
-			w32.RedrawWindow(
-				w.handle,
-				nil,
-				0,
-				w32.RDW_ERASE|w32.RDW_INVALIDATE|w32.RDW_FRAME|w32.RDW_ALLCHILDREN,
-			)
-		}
-	}
+	w.applyLayered()
 }
 
 type shortcut struct {

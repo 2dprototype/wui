@@ -112,6 +112,11 @@ func (p *Panel) create(id int) {
 		case w32.WM_NOTIFY:
 			p.onWM_NOTIFY(wParam, lParam)
 			return 0
+		case w32.WM_CTLCOLORSTATIC, w32.WM_CTLCOLOREDIT, w32.WM_CTLCOLORBTN, w32.WM_CTLCOLORLISTBOX:
+			if r, ok := ctlColor(p.children, containerBackground(p), msg, wParam, lParam); ok {
+				return r
+			}
+			return w32.DefSubclassProc(window, msg, wParam, lParam)
 		default:
 			return w32.DefSubclassProc(window, msg, wParam, lParam)
 		}
