@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wml version="1">
+  <Window Name="main" Title="WML login" InnerSize="400,300" CenterOnShow="true">
+    <Font Name="Tahoma" Height="-11"/>
+
+    <!-- A GroupBox only draws a frame. The controls that look as if they were
+         inside it are its siblings, added after it. Use a Panel to really
+         nest controls. -->
+    <GroupBox Text="Account" Bounds="10,10,380,120" HorizontalAnchor="MinAndMax"/>
+    <Label Text="User" Bounds="25,38,50,18"/>
+    <EditLine Name="user" Bounds="85,35,285,22" HorizontalAnchor="MinAndMax"/>
+    <Label Text="Password" Bounds="25,72,55,18"/>
+    <EditLine Name="pass" Bounds="85,69,285,22" IsPassword="true" HorizontalAnchor="MinAndMax"/>
+    <CheckBox Name="remember" Text="Remember me" Bounds="85,98,200,18" Checked="true"/>
+
+    <Label Text="Language" Bounds="10,145,70,18"/>
+    <ComboBox Name="lang" Bounds="85,142,150,22" SelectedIndex="0">
+      <Item>English</Item>
+      <Item>Bangla</Item>
+    </ComboBox>
+
+    <Button Name="cancel" Text="Cancel" Bounds="200,246,90,26"
+            HorizontalAnchor="Max" VerticalAnchor="Max" OnClick="doCancel"/>
+    <Button Name="ok" Text="Login" Bounds="300,246,90,26"
+            HorizontalAnchor="Max" VerticalAnchor="Max" OnClick="doLogin"/>
+
+    <StatusBar Name="status" Text="Ready" Bounds="0,278,400,22"
+               HorizontalAnchor="MinAndMax" VerticalAnchor="Max"/>
+  </Window>
+</wml>

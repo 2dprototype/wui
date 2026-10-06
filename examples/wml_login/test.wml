@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<wml version="1">
+  <Window Name="main" InnerSize="400,300" Title="WML login">
+    <Font Name="Tahoma" Height="-11"/>
+    <Button Name="cancel" Bounds="200,246,90,26" HorizontalAnchor="Max" VerticalAnchor="Max" Text="Cancel"/>
+    <Button Name="ok" Bounds="300,246,90,26" HorizontalAnchor="Max" VerticalAnchor="Max" Text="Login"/>
+    <StatusBar Name="status" Bounds="0,278,400,22" HorizontalAnchor="MinAndMax" VerticalAnchor="Max" Text="Ready"/>
+    <Panel Name="panel1" Bounds="87,8,203,226" BorderStyle="SingleLine">
+      <Font Name="Tahoma" Height="-11"/>
+      <Label Name="label4" Bounds="85,43,150,13" Text="Text Label"/>
+      <Slider Name="slider1" Bounds="42,112,150,45"/>
+      <TabControl Name="tabControl2" Bounds="26,149,150,60" SelectedIndex="0">
+        <Tab>Tab 1</Tab>
+        <Tab>Tab 2</Tab>
+      </TabControl>
+    </Panel>
+  </Window>
+</wml>

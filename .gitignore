@@ -1,2 +1,6 @@
 *.exe
 /test
+*.zip
+*.json
+/cmd/wmlcheck/*.exe
+/cmd/designer/*.exe

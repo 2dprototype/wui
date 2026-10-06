@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"go/format"
 	"io/ioutil"
@@ -20,13 +19,10 @@ import (
 	"github.com/2dprototype/wui"
 )
 
-// TODO Have color property for window background.
 // TODO Have icon for window.
 // TODO Have cursor properties for all controls, first let all controls have changeable cursors.
 // TODO Edit main menu.
 // TODO Have a way to edit shortcuts.
-// TODO Make edit lines select the whole text when they receive focus.
-// TODO Un-highlight the template when the mouse leaves the palette area, even when it leaves it fast.
 // TODO Have a way to hide the app icon (WS_EX_DLGMODALFRAME).
 // TODO Have a way to hide the border completely but make it still resizeable.
 
@@ -41,312 +37,6 @@ var (
 type event struct {
 	control interface{}
 	name    string
-}
-
-// ProjectData represents the serializable project state
-type ProjectData struct {
-	Windows []WindowData `json:"windows"`
-	Events  []EventData  `json:"events"`
-}
-
-type WindowData struct {
-	Name     string        `json:"name"`
-	Type     string        `json:"type"`
-	Props    []PropData    `json:"props"`
-	Font     *FontData     `json:"font,omitempty"`
-	Children []ControlData `json:"children,omitempty"`
-}
-
-type ControlData struct {
-	Name     string        `json:"name"`
-	Type     string        `json:"type"`
-	Props    []PropData    `json:"props"`
-	Font     *FontData     `json:"font,omitempty"`
-	Children []ControlData `json:"children,omitempty"`
-}
-
-type PropData struct {
-	Name  string      `json:"name"`
-	Value interface{} `json:"value"`
-}
-
-type FontData struct {
-	Name       string `json:"name"`
-	Height     int    `json:"height"`
-	Bold       bool   `json:"bold"`
-	Italic     bool   `json:"italic"`
-	Underlined bool   `json:"underlined"`
-	StrikedOut bool   `json:"striked_out"`
-}
-
-type EventData struct {
-	ControlName string `json:"control_name"`
-	EventName   string `json:"event_name"`
-	Code        string `json:"code"`
-}
-
-func saveProject(w *wui.Window, filePath string) error {
-	data := ProjectData{}
-	windowData := serializeWindow(w)
-	data.Windows = append(data.Windows, windowData)
-	
-	for evt, code := range events {
-		controlName := names[evt.control]
-		if controlName == "" {
-			continue
-		}
-		data.Events = append(data.Events, EventData{
-			ControlName: controlName,
-			EventName:   evt.name,
-			Code:        code,
-		})
-	}
-	
-	jsonData, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return err
-	}
-	
-	return ioutil.WriteFile(filePath, jsonData, 0666)
-}
-
-func serializeWindow(w *wui.Window) WindowData {
-	data := WindowData{
-		Name: names[w],
-		Type: reflect.TypeOf(w).Elem().Name(),
-	}
-	data.Props = serializeProperties(w)
-	if font := w.Font(); font != nil {
-		data.Font = serializeFont(font)
-	}
-	for _, child := range w.Children() {
-		data.Children = append(data.Children, serializeControl(child))
-	}
-	return data
-}
-
-func serializeControl(c wui.Control) ControlData {
-	data := ControlData{
-		Name: names[c],
-		Type: reflect.TypeOf(c).Elem().Name(),
-	}
-	data.Props = serializeProperties(c)
-	if f, ok := c.(fonter); ok {
-		if font := f.Font(); font != nil {
-			data.Font = serializeFont(font)
-		}
-	}
-	if container, ok := c.(wui.Container); ok {
-		for _, child := range container.Children() {
-			data.Children = append(data.Children, serializeControl(child))
-		}
-	}
-	return data
-}
-
-func serializeProperties(c interface{}) []PropData {
-	var props []PropData
-	for def, propList := range properties {
-		if reflect.TypeOf(c) == reflect.TypeOf(def) {
-			for _, prop := range propList {
-				if len(prop.combines) > 0 {
-					continue
-				}
-				if prop.skipDefault && hasDefaultValue(c, def, prop.name) {
-					continue
-				}
-				method := reflect.ValueOf(c).MethodByName(prop.name)
-				if !method.IsValid() {
-					continue
-				}
-				results := method.Call(nil)
-				if len(results) > 0 {
-					props = append(props, PropData{
-						Name:  prop.name,
-						Value: results[0].Interface(),
-					})
-				}
-			}
-			break
-		}
-	}
-	return props
-}
-
-func serializeFont(font *wui.Font) *FontData {
-	return &FontData{
-		Name:       font.Desc.Name,
-		Height:     font.Desc.Height,
-		Bold:       font.Desc.Bold,
-		Italic:     font.Desc.Italic,
-		Underlined: font.Desc.Underlined,
-		StrikedOut: font.Desc.StrikedOut,
-	}
-}
-
-func loadProject(filePath string) (*wui.Window, error) {
-	jsonData, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-	
-	var data ProjectData
-	if err := json.Unmarshal(jsonData, &data); err != nil {
-		return nil, err
-	}
-	
-	if len(data.Windows) == 0 {
-		return nil, fmt.Errorf("no windows found in project file")
-	}
-	
-	names = make(map[interface{}]string)
-	events = make(map[event]string)
-	
-	window := deserializeWindow(data.Windows[0])
-	
-	for _, evt := range data.Events {
-		var control interface{}
-		findControlByName(window, evt.ControlName, &control)
-		if control != nil {
-			events[event{control: control, name: evt.EventName}] = evt.Code
-		}
-	}
-	
-	return window, nil
-}
-
-func deserializeWindow(data WindowData) *wui.Window {
-	window := defaultWindow()
-	names[window] = data.Name
-	applyProperties(window, data.Props)
-	if data.Font != nil {
-		if font, err := deserializeFont(data.Font); err == nil {
-			window.SetFont(font)
-		}
-	}
-	for _, childData := range data.Children {
-		child := deserializeControl(childData)
-		window.Add(child)
-	}
-	return window
-}
-
-func deserializeControl(data ControlData) wui.Control {
-	var control wui.Control
-	switch data.Type {
-	case "Button":
-		control = wui.NewButton()
-	case "CheckBox":
-		control = wui.NewCheckBox()
-	case "RadioButton":
-		control = wui.NewRadioButton()
-	case "Slider":
-		control = wui.NewSlider()
-	case "Panel":
-		control = wui.NewPanel()
-	case "Label":
-		control = wui.NewLabel()
-	case "PaintBox":
-		control = wui.NewPaintBox()
-	case "EditLine":
-		control = wui.NewEditLine()
-	case "IntUpDown":
-		control = wui.NewIntUpDown()
-	case "ComboBox":
-		control = wui.NewComboBox()
-	case "ProgressBar":
-		control = wui.NewProgressBar()
-	case "FloatUpDown":
-		control = wui.NewFloatUpDown()
-	case "TextEdit":
-		control = wui.NewTextEdit()
-	case "GroupBox":
-		control = wui.NewGroupBox()
-	case "StatusBar":
-		control = wui.NewStatusBar()
-	case "TabControl":
-		control = wui.NewTabControl()
-	case "DatePicker":
-		control = wui.NewDatePicker()
-	default:
-		panic("unknown control type: " + data.Type)
-	}
-	
-	names[control] = data.Name
-	applyProperties(control, data.Props)
-	
-	if data.Font != nil {
-		if f, ok := control.(fonter); ok {
-			if font, err := deserializeFont(data.Font); err == nil {
-				f.SetFont(font)
-			}
-		}
-	}
-	
-	if container, ok := control.(wui.Container); ok {
-		for _, childData := range data.Children {
-			child := deserializeControl(childData)
-			container.Add(child)
-		}
-	}
-	
-	return control
-}
-
-func applyProperties(c interface{}, props []PropData) {
-	for _, prop := range props {
-		setterName := "Set" + prop.Name
-		method := reflect.ValueOf(c).MethodByName(setterName)
-		if !method.IsValid() {
-			continue
-		}
-		if method.Type().NumIn() != 1 || prop.Value == nil {
-			continue
-		}
-		paramType := method.Type().In(0)
-		value := reflect.ValueOf(prop.Value)
-		if list, ok := prop.Value.([]interface{}); ok && paramType == reflect.TypeOf([]string{}) {
-			// JSON turns string lists into []interface{}.
-			strs := make([]string, 0, len(list))
-			for _, item := range list {
-				if s, ok := item.(string); ok {
-					strs = append(strs, s)
-				}
-			}
-			value = reflect.ValueOf(strs)
-		} else if value.Type().ConvertibleTo(paramType) {
-			value = value.Convert(paramType)
-		} else {
-			continue
-		}
-		method.Call([]reflect.Value{value})
-	}
-}
-
-func deserializeFont(data *FontData) (*wui.Font, error) {
-	return wui.NewFont(wui.FontDesc{
-		Name:       data.Name,
-		Height:     data.Height,
-		Bold:       data.Bold,
-		Italic:     data.Italic,
-		Underlined: data.Underlined,
-		StrikedOut: data.StrikedOut,
-	})
-}
-
-func findControlByName(container wui.Container, name string, result *interface{}) {
-	for _, child := range container.Children() {
-		if names[child] == name {
-			*result = child
-			return
-		}
-		if subContainer, ok := child.(wui.Container); ok {
-			findControlByName(subContainer, name, result)
-			if *result != nil {
-				return
-			}
-		}
-	}
 }
 
 func main() {
@@ -372,15 +62,6 @@ func main() {
 		preview        = wui.NewPaintBox()
 	)
 
-	theWindow := defaultWindow()
-	names[theWindow] = "window"
-	
-	{
-		ow, oh := theWindow.Size()
-		iw, ih := theWindow.InnerSize()
-		println("project window outer:", ow, oh, "inner:", iw, ih)
-	}
-
 	font, _ := wui.NewFont(wui.FontDesc{Name: "Tahoma", Height: -11})
 	bold, _ := wui.NewFont(wui.FontDesc{Name: "Tahoma", Height: -11, Bold: true})
 	italic, _ := wui.NewFont(wui.FontDesc{Name: "Tahoma", Height: -11, Italic: true})
@@ -392,12 +73,14 @@ func main() {
 	w.SetBackground(wui.ColorButtonFace)
 	w.SetInnerSize(800, 600)
 
+	theWindow := defaultWindow()
+	names[theWindow] = "window"
+
 	// Menu setup
 	menu := wui.NewMainMenu()
 	fileMenu := wui.NewMenu("&File")
 	editMenu := wui.NewMenu("&Edit")
 	viewMenu := wui.NewMenu("&View")
-	projectMenu := wui.NewMenu("&Project")
 	helpMenu := wui.NewMenu("&Help")
 
 	// File menu items
@@ -406,33 +89,21 @@ func main() {
 	fileSaveMenu := wui.NewMenuString("&Save Project\tCtrl+S")
 	fileSaveAsMenu := wui.NewMenuString("Save Project &As...\tCtrl+Shift+S")
 	fileExportGoMenu := wui.NewMenuString("&Export as Go...\tCtrl+E")
-	fileExportJSONMenu := wui.NewMenuString("Export as &JSON...\tCtrl+J")
 	previewMenu := wui.NewMenuString("&Run Preview\tF5")
 	exitMenu := wui.NewMenuString("E&xit\tAlt+F4")
 
 	// Edit menu items
-	undoMenu := wui.NewMenuString("&Undo\tCtrl+Z")
-	redoMenu := wui.NewMenuString("&Redo\tCtrl+Y")
 	cutMenu := wui.NewMenuString("Cu&t\tCtrl+X")
 	copyMenu := wui.NewMenuString("&Copy\tCtrl+C")
 	pasteMenu := wui.NewMenuString("&Paste\tCtrl+V")
 	deleteMenu := wui.NewMenuString("&Delete\tDel")
-	selectAllMenu := wui.NewMenuString("Select &All\tCtrl+A")
 
 	// View menu items
-	viewZoomInMenu := wui.NewMenuString("Zoom &In\tCtrl++")
-	viewZoomOutMenu := wui.NewMenuString("Zoom &Out\tCtrl+-")
-	viewZoomResetMenu := wui.NewMenuString("&Reset Zoom\tCtrl+0")
-	viewFullScreenMenu := wui.NewMenuString("&Full Screen\tF11")
+	viewFullScreenMenu := wui.NewMenuString("&Maximize Window\tF11")
 	viewToolboxMenu := wui.NewMenuString("Toggle &Toolbox\tF2")
 	viewPropsMenu := wui.NewMenuString("Toggle &Properties\tF3")
 	viewAutoLayoutMenu := wui.NewMenuString("&Auto Layout\tF4")
 	duplicateMenu := wui.NewMenuString("D&uplicate\tCtrl+D")
-
-	// Project menu items
-	projectSettingsMenu := wui.NewMenuString("Project &Settings...\tAlt+Enter")
-	projectPreviewMenu := wui.NewMenuString("&Preview Window\tF5")
-	projectBuildMenu := wui.NewMenuString("&Build Preview\tCtrl+F5")
 
 	// Help menu items
 	helpAboutMenu := wui.NewMenuString("&About wui Designer\tF1")
@@ -446,41 +117,25 @@ func main() {
 	fileMenu.Add(fileSaveAsMenu)
 	fileMenu.Add(wui.NewMenuSeparator())
 	fileMenu.Add(fileExportGoMenu)
-	fileMenu.Add(fileExportJSONMenu)
 	fileMenu.Add(wui.NewMenuSeparator())
 	fileMenu.Add(previewMenu)
 	fileMenu.Add(wui.NewMenuSeparator())
 	fileMenu.Add(exitMenu)
 
 	// Build Edit menu
-	editMenu.Add(undoMenu)
-	editMenu.Add(redoMenu)
-	editMenu.Add(wui.NewMenuSeparator())
 	editMenu.Add(cutMenu)
 	editMenu.Add(copyMenu)
 	editMenu.Add(pasteMenu)
 	editMenu.Add(duplicateMenu)
 	editMenu.Add(wui.NewMenuSeparator())
 	editMenu.Add(deleteMenu)
-	editMenu.Add(wui.NewMenuSeparator())
-	editMenu.Add(selectAllMenu)
 
 	// Build View menu
-	viewMenu.Add(viewZoomInMenu)
-	viewMenu.Add(viewZoomOutMenu)
-	viewMenu.Add(viewZoomResetMenu)
-	viewMenu.Add(wui.NewMenuSeparator())
 	viewMenu.Add(viewToolboxMenu)
 	viewMenu.Add(viewPropsMenu)
 	viewMenu.Add(viewAutoLayoutMenu)
 	viewMenu.Add(wui.NewMenuSeparator())
 	viewMenu.Add(viewFullScreenMenu)
-
-	// Build Project menu
-	projectMenu.Add(projectSettingsMenu)
-	projectMenu.Add(wui.NewMenuSeparator())
-	projectMenu.Add(projectPreviewMenu)
-	projectMenu.Add(projectBuildMenu)
 
 	// Build Help menu
 	helpMenu.Add(helpAboutMenu)
@@ -490,7 +145,6 @@ func main() {
 	menu.Add(fileMenu)
 	menu.Add(editMenu)
 	menu.Add(viewMenu)
-	menu.Add(projectMenu)
 	menu.Add(helpMenu)
 	w.SetMenu(menu)
 
@@ -543,6 +197,41 @@ func main() {
 		setWorkingPath(path)
 		markSaved()
 		return true
+	}
+
+	// saveAs asks for a file name and saves the project there.
+	saveAs := func() bool {
+		save := wui.NewFileSaveDialog()
+		save.SetAppendExt(true)
+		save.SetTitle("Save wui Designer Project")
+		save.AddFilter("WML project file", projectExt)
+		if accept, path := save.Execute(w); accept {
+			return saveProjectFile(path)
+		}
+		return false
+	}
+
+	saveCurrent := func() bool {
+		if workingPath != "" {
+			return saveProjectFile(workingPath)
+		}
+		return saveAs()
+	}
+
+	// confirmDiscard asks what to do with unsaved changes. It returns false if
+	// the user wants to keep working, or if saving did not succeed.
+	confirmDiscard := func(question string) bool {
+		if !projectModified {
+			return true
+		}
+		switch wui.MessageBoxCustom("Unsaved Changes", question,
+			w32.MB_YESNOCANCEL|w32.MB_ICONQUESTION) {
+		case w32.IDYES:
+			return saveCurrent()
+		case w32.IDNO:
+			return true
+		}
+		return false
 	}
 
 	boolPanel := func(parent wui.Container, name string) (*wui.CheckBox, *wui.Panel) {
@@ -1327,10 +1016,11 @@ func main() {
 		dlg.Add(code)
 
 		ev := event{target, evName}
-		if events[ev] == "" {
-			events[ev] = defaultCode
+		current := events[ev]
+		if current == "" {
+			current = defaultCode
 		}
-		code.SetText(strings.Replace(events[ev], "\n", "\r\n", -1))
+		code.SetText(strings.Replace(current, "\n", "\r\n", -1))
 		cursor := len(defaultCode) + 3
 		if i := strings.Index(defaultCode, "\n"); i >= 0 {
 			cursor = i + 3
@@ -1766,6 +1456,12 @@ func main() {
 		}
 		lastX, lastY = x, y
 
+		// Un-highlight the template when the mouse has left the toolbox.
+		if highlightedTemplate != nil && !contains(palette, x, y) {
+			highlightedTemplate = nil
+			palette.Paint()
+		}
+
 		if mouseMode == addControl {
 			if contains(preview, x, y) {
 				_, _, w, h := controlToAdd.Bounds()
@@ -1974,30 +1670,29 @@ func main() {
 
 	// openPath loads the project file and shows it.
 	openPath := func(path string) {
-		newWindow, err := loadProject(path)
+		newWindow, notice, err := loadProject(path)
 		if err != nil {
-			wui.MessageBoxError("Error", "Failed to load project: "+err.Error())
+			wui.MessageBoxError("Error", "Failed to load project:\n"+err.Error())
 			return
 		}
 		theWindow = newWindow
 		panX, panY = 0, 0
 		activate(theWindow)
-		preview.Paint()
+		layoutMain()
 		setWorkingPath(path)
 		markSaved()
+		if notice != "" {
+			wui.MessageBoxInfo("Project", notice)
+		}
 	}
 
 	// Dropping a project file onto the designer opens it.
 	w.SetOnDropFiles(func(files []string, x, y int) {
 		for _, f := range files {
-			if strings.HasSuffix(strings.ToLower(f), ".json") {
-				if projectModified {
-					if wui.MessageBoxYesNo("Unsaved Changes",
-						"Do you want to save changes to the current project?") {
-						fileSaveMenu.OnClick()()
-					}
+			if strings.HasSuffix(strings.ToLower(f), projectExt) {
+				if confirmDiscard("Do you want to save changes to the current project?") {
+					openPath(f)
 				}
-				openPath(f)
 				return
 			}
 		}
@@ -2005,37 +1700,28 @@ func main() {
 
 	// New project
 	fileNewMenu.SetOnClick(func() {
-		if projectModified {
-			result := wui.MessageBoxYesNo("Unsaved Changes", 
-				"Do you want to save changes to the current project?")
-			if result { // Yes
-				fileSaveMenu.OnClick()()
-			} 
+		if !confirmDiscard("Do you want to save changes to the current project?") {
+			return
 		}
-		
 		theWindow = defaultWindow()
 		names = make(map[interface{}]string)
 		names[theWindow] = "window"
 		events = make(map[event]string)
+		panX, panY = 0, 0
 		activate(theWindow)
-		preview.Paint()
+		layoutMain()
 		setWorkingPath("")
 		markSaved()
 	})
 
 	// Open project
 	fileOpenMenu.SetOnClick(func() {
-		if projectModified {
-			result := wui.MessageBoxYesNo("Unsaved Changes", 
-				"Do you want to save changes to the current project?")
-			if result {
-				fileSaveMenu.OnClick()()
-			} 
+		if !confirmDiscard("Do you want to save changes to the current project?") {
+			return
 		}
-		
 		open := wui.NewFileOpenDialog()
 		open.SetTitle("Open wui Designer Project")
-		open.AddFilter("JSON project file", ".json")
+		open.AddFilter("WML project file", projectExt)
 		open.AddFilter("All files", "*")
 		if accept, path := open.ExecuteSingleSelection(w); accept {
 			openPath(path)
@@ -2044,21 +1730,12 @@ func main() {
 
 	// Save project
 	fileSaveMenu.SetOnClick(func() {
-		if workingPath != "" {
-			saveProjectFile(workingPath)
-		} else {
-			fileSaveAsMenu.OnClick()()
-		}
+		saveCurrent()
 	})
 
 	// Save project as
 	fileSaveAsMenu.SetOnClick(func() {
-		save := wui.NewFileSaveDialog()
-		save.SetAppendExt(true)
-		save.AddFilter("JSON project file", ".json")
-		if accept, path := save.Execute(w); accept {
-			saveProjectFile(path)
-		}
+		saveAs()
 	})
 
 	// Export as Go
@@ -2077,20 +1754,6 @@ func main() {
 		}
 	})
 
-	// Export as JSON
-	fileExportJSONMenu.SetOnClick(func() {
-		save := wui.NewFileSaveDialog()
-		save.SetAppendExt(true)
-		save.AddFilter("JSON file", ".json")
-		if accept, path := save.Execute(w); accept {
-			if err := saveProject(theWindow, path); err != nil {
-				wui.MessageBoxError("Error", "Failed to export project: "+err.Error())
-			} else {
-				wui.MessageBoxInfo("Success", "Project exported to "+path)
-			}
-		}
-	})
-
 	// Preview
 	previewMenu.SetOnClick(func() {
 		x, y := w32.ClientToScreen(w32.HWND(w.Handle()), preview.X(), preview.Y())
@@ -2104,37 +1767,10 @@ func main() {
 
 	// Window close handler
 	w.SetOnCanClose(func() bool {
-		if projectModified {
-			result := wui.MessageBoxYesNo("Unsaved Changes", 
-				"Do you want to save changes before exiting?")
-			if result {
-				if workingPath != "" {
-					return saveProjectFile(workingPath)
-				} else {
-					save := wui.NewFileSaveDialog()
-					save.SetAppendExt(true)
-					save.AddFilter("JSON project file", ".json")
-					if accept, path := save.Execute(w); accept {
-						return saveProjectFile(path)
-					}
-					return false
-				}
-			} else {
-				return true
-			}
-		}
-		return true
+		return confirmDiscard("Do you want to save changes before exiting?")
 	})
 
 	// Edit operations
-	undoMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Undo not yet implemented")
-	})
-
-	redoMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Redo not yet implemented")
-	})
-
 	// A copied control is kept as a clone together with its position.
 	var clipCtl wui.Control
 	var clipX, clipY int
@@ -2144,7 +1780,7 @@ func main() {
 		if !ok || active == theWindow {
 			return false
 		}
-		clipCtl = cloneControl(c)
+		clipCtl = cloneTree(c)
 		clipX, clipY, _, _ = c.Bounds()
 		return true
 	}
@@ -2162,12 +1798,15 @@ func main() {
 		if target == nil {
 			target = theWindow
 		}
-		nc := cloneControl(clipCtl)
+		nc := cloneTree(clipCtl)
 		_, _, cw, ch := clipCtl.Bounds()
 		clipX += 10
 		clipY += 10
 		nc.SetBounds(clipX, clipY, cw, ch)
 		names[nc] = defaultName(nc)
+		if con, ok := nc.(wui.Container); ok {
+			nameAll(con)
+		}
 		target.Add(nc)
 		activate(nc)
 		preview.Paint()
@@ -2216,23 +1855,7 @@ func main() {
 		}
 	})
 
-	selectAllMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Select All not yet implemented")
-	})
-
 	// View operations
-	viewZoomInMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Zoom In not yet implemented")
-	})
-
-	viewZoomOutMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Zoom Out not yet implemented")
-	})
-
-	viewZoomResetMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Reset Zoom not yet implemented")
-	})
-
 	viewToolboxMenu.SetOnClick(func() {
 		if paletteVisible {
 			paletteMode = modeHidden
@@ -2264,24 +1887,12 @@ func main() {
 		}
 	})
 
-	// Project operations
-	projectSettingsMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Project Settings not yet implemented")
-	})
-
-	projectPreviewMenu.SetOnClick(func() {
-		previewMenu.OnClick()()
-	})
-
-	projectBuildMenu.SetOnClick(func() {
-		wui.MessageBoxInfo("TODO", "Build Preview not yet implemented")
-	})
-
 	// Help operations
 	helpAboutMenu.SetOnClick(func() {
 		wui.MessageBoxInfo("About wui Designer", 
 			"wui Designer\n\n"+
-			"A visual designer for wui GUI applications.\n\n"+
+			"A visual designer for wui GUI applications.\n"+
+			"Projects are saved as WML (.wml) files.\n\n"+
 			"Created with wui framework.\n"+
 			"https://github.com/2dprototype/wui")
 	})
@@ -2294,31 +1905,20 @@ func main() {
 			"  Ctrl+S - Save Project\n"+
 			"  Ctrl+Shift+S - Save Project As\n"+
 			"  Ctrl+E - Export as Go\n"+
-			"  Ctrl+J - Export as JSON\n"+
 			"  F5 - Run Preview\n"+
 			"  Alt+F4 - Exit\n\n"+
 			"Edit Operations:\n"+
-			"  Ctrl+Z - Undo\n"+
-			"  Ctrl+Y - Redo\n"+
 			"  Ctrl+X - Cut\n"+
 			"  Ctrl+C - Copy\n"+
 			"  Ctrl+V - Paste\n"+
 			"  Del - Delete\n"+
-			"  Ctrl+A - Select All\n"+
 			"  Ctrl+D - Duplicate\n\n"+
 			"View Operations:\n"+
-			"  Ctrl++ - Zoom In\n"+
-			"  Ctrl+- - Zoom Out\n"+
-			"  Ctrl+0 - Reset Zoom\n"+
-			"  F11 - Full Screen\n"+
+			"  F11 - Maximize / restore window\n"+
 			"  F2 - Toggle Toolbox\n"+
 			"  F3 - Toggle Properties\n"+
 			"  F4 - Auto Layout\n"+
 			"  Mouse wheel - scroll panels / pan preview (Shift: sideways)\n\n"+
-			"Project Operations:\n"+
-			"  Alt+Enter - Project Settings\n"+
-			"  F5 - Preview Window\n"+
-			"  Ctrl+F5 - Build Preview\n\n"+
 			"Help:\n"+
 			"  F1 - About\n"+
 			"  Ctrl+F1 - Keyboard Shortcuts")
@@ -2330,30 +1930,19 @@ func main() {
 	w.SetShortcut(fileSaveMenu.OnClick(), wui.KeyControl, wui.KeyS)
 	w.SetShortcut(fileSaveAsMenu.OnClick(), wui.KeyControl, wui.KeyShift, wui.KeyS)
 	w.SetShortcut(fileExportGoMenu.OnClick(), wui.KeyControl, wui.KeyE)
-	w.SetShortcut(fileExportJSONMenu.OnClick(), wui.KeyControl, wui.KeyJ)
 	w.SetShortcut(previewMenu.OnClick(), wui.KeyF5)
 	w.SetShortcut(exitMenu.OnClick(), wui.KeyAlt, wui.KeyF4)
 
-	w.SetShortcut(undoMenu.OnClick(), wui.KeyControl, wui.KeyZ)
-	w.SetShortcut(redoMenu.OnClick(), wui.KeyControl, wui.KeyY)
 	w.SetShortcut(cutMenu.OnClick(), wui.KeyControl, wui.KeyX)
 	w.SetShortcut(copyMenu.OnClick(), wui.KeyControl, wui.KeyC)
 	w.SetShortcut(pasteMenu.OnClick(), wui.KeyControl, wui.KeyV)
 	w.SetShortcut(deleteMenu.OnClick(), wui.KeyDelete)
-	w.SetShortcut(selectAllMenu.OnClick(), wui.KeyControl, wui.KeyA)
 	w.SetShortcut(duplicateMenu.OnClick(), wui.KeyControl, wui.KeyD)
 	w.SetShortcut(viewToolboxMenu.OnClick(), wui.KeyF2)
 	w.SetShortcut(viewPropsMenu.OnClick(), wui.KeyF3)
 	w.SetShortcut(viewAutoLayoutMenu.OnClick(), wui.KeyF4)
 
-	// w.SetShortcut(viewZoomInMenu.OnClick(), wui.KeyControl, wui.KeyPlus)
-	// w.SetShortcut(viewZoomOutMenu.OnClick(), wui.KeyControl, wui.KeyMinus)
-	// w.SetShortcut(viewZoomResetMenu.OnClick(), wui.KeyControl, wui.Key0)
-	// w.SetShortcut(viewFullScreenMenu.OnClick(), wui.KeyF11)
-
-	// w.SetShortcut(projectSettingsMenu.OnClick(), wui.KeyAlt, wui.KeyEnter)
-	w.SetShortcut(projectPreviewMenu.OnClick(), wui.KeyF5)
-	w.SetShortcut(projectBuildMenu.OnClick(), wui.KeyControl, wui.KeyF5)
+	w.SetShortcut(viewFullScreenMenu.OnClick(), wui.KeyF11)
 
 	w.SetShortcut(helpAboutMenu.OnClick(), wui.KeyF1)
 	w.SetShortcut(helpShortcutsMenu.OnClick(), wui.KeyControl, wui.KeyF1)
@@ -2386,6 +1975,80 @@ func main() {
 			preview.Paint()
 		}
 	})
+	
+	w.SetMinSize(360, 300)
+	w.SetOnResize(layoutMain)
+	layoutMain()
+
+	w.SetOnMouseWheel(func(sx, sy int, delta float64) {
+		x, y, ok := w32.ScreenToClient(w32.HWND(w.Handle()), sx, sy)
+		if !ok {
+			return
+		}
+		step := int(-delta * 40)
+		switch {
+		case propsVisible && x < sideWidth:
+			propScroll += step
+			layoutProps()
+			updateProperties()
+		case paletteVisible && contains(palette, x, y):
+			paletteScroll += step
+			layoutPalette()
+		case contains(preview, x, y):
+			winW, winH := theWindow.Size()
+			if w32.GetKeyState(w32.VK_SHIFT)&0x8000 != 0 {
+				panX = max(0, min(panX+step, winW+40-preview.Width()))
+			} else {
+				panY = max(0, min(panY+step, winH+60-preview.Height()))
+			}
+			preview.Paint()
+		}
+	})
+
+	// ------------------------------------------------------------------
+	// FIX: the design window created at the top of main() ends up with
+	// the wrong inner size because SetInnerSize relies on frame metrics
+	// (border width, caption height) that the framework only learns once
+	// a real window has been shown. The metrics are correct by the time
+	// the designer window becomes visible, so we recreate the design
+	// window in the first OnShow callback.
+	//
+	// This is also where a project file given on the command line is
+	// loaded, so that it can replace the freshly created empty window.
+	//
+	// Usage: designer.exe <file.wml>
+	// ------------------------------------------------------------------
+	firstShow := true
+	w.SetOnShow(func() {
+		if !firstShow {
+			return
+		}
+		firstShow = false
+
+		// Recreate the empty design window with correct frame metrics.
+		theWindow = defaultWindow()
+		names = make(map[interface{}]string)
+		names[theWindow] = "window"
+		events = make(map[event]string)
+		panX, panY = 0, 0
+		activate(theWindow)
+		layoutMain()
+		setWorkingPath("")
+		markSaved()
+
+		// If a project file was passed on the command line, load it now.
+		// This also handles .wml files dropped onto the executable in
+		// Windows Explorer, since Explorer passes them as arguments.
+		// "-flag" style arguments are skipped so future options do not get
+		// confused with a project path.
+		for _, arg := range os.Args[1:] {
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			openPath(arg)
+			break
+		}
+	})
 
 	w.SetState(wui.WindowMaximized)
 	w.Show()
@@ -2404,15 +2067,21 @@ func (r rectangle) contains(x, y int) bool {
 	return x >= r.x && y >= r.y && x < r.x+r.w && y < r.y+r.h
 }
 
-func defaultWindow() *wui.Window {
+func defaultFont() *wui.Font {
 	font, _ := wui.NewFont(wui.FontDesc{Name: "Tahoma", Height: -11})
-	w := wui.NewWindow()
-	w.SetFont(font)
-	w.SetTitle("Window")
-	w.SetSize(616, 439)   // outer — gives ~600x400 inner
-	return w
+	return font
 }
 
+// defaultWindow is the empty window of a new project. Its size is given as
+// inner size: the area for controls is then always 600x400, whatever the
+// borders and the title bar of the current Windows version and theme are.
+func defaultWindow() *wui.Window {
+	w := wui.NewWindow()
+	w.SetFont(defaultFont())
+	w.SetTitle("Window")
+	w.SetInnerSize(600, 400)
+	return w
+}
 
 func findControlAt(parent wui.Container, x, y int) node {
 	for _, child := range parent.Children() {
@@ -3292,6 +2961,42 @@ func writeControl(c interface{}, parentName, name string, line func(format strin
 			writeControl(child, name, childName, line)
 		}
 	}
+}
+
+// cloneTree copies a control the way copy and paste needs it: including the
+// colors, the font, the anchors, enabled and visible and all child controls.
+func cloneTree(c wui.Control) wui.Control {
+	n := cloneControl(c)
+	h, v := c.Anchors()
+	n.SetHorizontalAnchor(h)
+	n.SetVerticalAnchor(v)
+	if src, ok := c.(enabler); ok {
+		if dst, ok := n.(enabler); ok {
+			dst.SetEnabled(src.Enabled())
+		}
+	}
+	if src, ok := c.(visibler); ok {
+		if dst, ok := n.(visibler); ok {
+			dst.SetVisible(src.Visible())
+		}
+	}
+	if src, ok := c.(fonter); ok {
+		if dst, ok := n.(fonter); ok && src.Font() != nil {
+			dst.SetFont(src.Font())
+		}
+	}
+	if src, ok := c.(wui.Container); ok {
+		if dst, ok := n.(wui.Container); ok {
+			for _, child := range src.Children() {
+				cc := cloneTree(child)
+				x, y, _, _ := child.Bounds()
+				_, _, cw, ch := cc.Bounds()
+				cc.SetBounds(x, y, cw, ch)
+				dst.Add(cc)
+			}
+		}
+	}
+	return n
 }
 
 // cloneControl copies a control including its colors.

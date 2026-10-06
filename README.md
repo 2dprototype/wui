@@ -168,6 +168,37 @@ Projects are saved as JSON files with the following structure:
 }
 ```
 
+## WML: XML Layouts (package wml)
+
+`github.com/2dprototype/wui/wml` loads window layouts from XML files at run
+time, similar to QML or XAML. The layout contains data only; events refer to
+Go functions by name.
+
+```xml
+<wml version="1">
+  <Window Name="main" Title="Login" InnerSize="400,300">
+    <EditLine Name="user" Bounds="80,10,300,22"/>
+    <Button Text="Login" Bounds="300,260,90,26" OnClick="doLogin"/>
+  </Window>
+</wml>
+```
+
+```go
+type form struct {
+	Window *wui.Window   `wml:"main"`
+	User   *wui.EditLine `wml:"user"`
+}
+
+doc, err := wml.ParseFile("login.xml") // validated, with line and column in errors
+var f form
+_, err = doc.Build(&f, wml.Handlers{"doLogin": func() { println(f.User.Text()) }})
+f.Window.Show()
+```
+
+See [wml/README.md](wml/README.md) for the format reference. `go run
+./cmd/wmlcheck file.xml` validates a layout without opening a window, and
+`examples/wml_login` is a complete program.
+
 ## Installation
 
 ```bash
