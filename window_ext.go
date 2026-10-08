@@ -25,6 +25,8 @@ type windowExt struct {
 	closeToTray      bool
 	programmaticClose bool
 	taskbarCreated   uint32
+	inv              invokeState
+	feat             windowFeatures
 }
 
 // DefaultTransparentColor is the key color used by SetTransparent when no
@@ -240,6 +242,7 @@ func (w *Window) SetBackgroundColor(c Color) {
 
 // extAfterCreate is called once the window and all its controls exist.
 func (w *Window) extAfterCreate() {
+	defer w.windowStarted()
 	w.ext.taskbarCreated = registerWindowMessage("TaskbarCreated")
 	w.applyDropTarget()
 	w.applyRegion()
@@ -258,6 +261,9 @@ func registerWindowMessage(name string) uint32 {
 // extMsg handles the messages of the extended window features. It returns true
 // if the message was handled and the result must be returned to Windows.
 func (w *Window) extMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) (uintptr, bool) {
+	if r, handled := w.ext2Msg(window, msg, wParam, lParam); handled {
+		return r, true
+	}
 	if w.ext.taskbarCreated != 0 && msg == w.ext.taskbarCreated {
 		// Explorer was restarted, bring the tray icon back.
 		if w.ext.tray != nil {

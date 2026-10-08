@@ -227,3 +227,8 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 ## Acknowledgments
 
 Special thanks to [gonutz](https://github.com/gonutz) for creating the original wui library that made this project possible.
+## New in this version
+
+Many controls and features were added (ListView, RichEdit, NativeToolBar, layouts,
+DPI awareness, `Window.Invoke`, ...). See [docs/NEW_FEATURES.md](docs/NEW_FEATURES.md)
+and `examples/showcase`. That code has not been compiled yet, read the note there.

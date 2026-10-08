@@ -13,9 +13,11 @@ func NewComboBox() *ComboBox {
 
 type ComboBox struct {
 	textControl
-	items    []string
-	selected int
-	onChange func(newIndex int)
+	items        []string
+	selected     int
+	onChange     func(newIndex int)
+	editable     bool
+	onTextChange func()
 }
 
 var _ Control = (*ComboBox)(nil)
@@ -45,7 +47,7 @@ func (e *ComboBox) create(id int) {
 		id,
 		w32.WS_EX_CLIENTEDGE,
 		"COMBOBOX",
-		w32.WS_TABSTOP|w32.CBS_DROPDOWNLIST,
+		w32.WS_TABSTOP|e.dropStyle(),
 	)
 	for _, s := range e.items {
 		e.addItem(s)
@@ -116,5 +118,8 @@ func (e *ComboBox) SetOnChange(f func(newIndex int)) {
 func (e *ComboBox) handleNotification(cmd uintptr) {
 	if cmd == w32.CBN_SELCHANGE && e.onChange != nil {
 		e.onChange(e.SelectedIndex())
+	}
+	if cmd == w32.CBN_EDITCHANGE && e.onTextChange != nil {
+		e.onTextChange()
 	}
 }

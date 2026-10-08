@@ -8,7 +8,13 @@ func NewButton() *Button {
 
 type Button struct {
 	textControl
-	onClick func()
+	onClick    func()
+	kind       ButtonKind
+	note       string
+	icon       *ImageList
+	dropMenu   *PopupMenu
+	onDropDown func()
+	isDefault  bool
 }
 
 var _ Control = (*Button)(nil)
@@ -38,7 +44,8 @@ func (b *Button) SetOnClick(f func()) {
 }
 
 func (b *Button) create(id int) {
-	b.textControl.create(id, 0, "BUTTON", w32.WS_TABSTOP|w32.BS_PUSHBUTTON)
+	b.textControl.create(id, 0, "BUTTON", w32.WS_TABSTOP|b.styleBits())
+	b.applyExtras()
 }
 
 func (b *Button) handleNotification(cmd uintptr) {

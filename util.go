@@ -28,7 +28,8 @@ func initCommonControls() {
 	commonControlsInitialized = true
 	w32.InitCommonControlsEx(&w32.INITCOMMONCONTROLSEX{
 		ICC: w32.ICC_DATE_CLASSES | w32.ICC_TAB_CLASSES | w32.ICC_BAR_CLASSES |
-			w32.ICC_LISTVIEW_CLASSES | w32.ICC_PROGRESS_CLASS | w32.ICC_UPDOWN_CLASS,
+			w32.ICC_LISTVIEW_CLASSES | w32.ICC_PROGRESS_CLASS | w32.ICC_UPDOWN_CLASS |
+			0x2 | 0x40 | 0x800 | 0x4000 | 0x8000, // tree view, hot key, internet (IP address), standard, link
 	})
 }
 

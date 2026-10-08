@@ -720,36 +720,45 @@ func (w *Window) Close() {
 }
 
 func (w *Window) interceptMessage(msg *w32.MSG) bool {
+	if msg.Message == w32.WM_KEYDOWN && (msg.WParam == w32.VK_RETURN || msg.WParam == w32.VK_ESCAPE) {
+		if w.handleDefaultKeys(msg.WParam) {
+			return true
+		}
+	}
 	if msg.Message == w32.WM_KEYDOWN && msg.WParam == w32.VK_TAB {
+		list := w.tabList()
+		if len(list) == 0 {
+			return false
+		}
 		focus := uintptr(w32.GetFocus())
 		cur := func() int {
-			for i := range w.controls {
-				if w.controls[i].Handle() == focus {
+			for i := range list {
+				if list[i].Handle() == focus {
 					return i
 				}
 			}
 			return -1
 		}()
-		if cur != -1 && w.controls[cur].eatsTabs() {
+		if cur != -1 && list[cur].eatsTabs() {
 			return false
 		}
 		shiftDown := w32.GetKeyState(w32.VK_SHIFT)&0x8000 != 0
 		nth := func(i int) int {
-			return (cur + 1 + i) % len(w.controls)
+			return (cur + 1 + i) % len(list)
 		}
 		if shiftDown {
 			nth = func(i int) int {
-				return (cur + len(w.controls) - 1 - i) % len(w.controls)
+				return (cur + len(list) - 1 - i) % len(list)
 			}
 		}
-		for i := range w.controls {
+		for i := range list {
 			j := nth(i)
-			if w.controls[j].Parent() != nil &&
-				w.controls[j].canFocus() &&
-				Visible(w.controls[j]) &&
-				Enabled(w.controls[j]) {
-				w32.SetFocus(w32.HWND(w.controls[j].Handle()))
-				w.controls[j].wasFocussedWithTab()
+			if list[j].Parent() != nil &&
+				list[j].canFocus() &&
+				Visible(list[j]) &&
+				Enabled(list[j]) {
+				w32.SetFocus(w32.HWND(list[j].Handle()))
+				list[j].wasFocussedWithTab()
 				return true
 			}
 		}
@@ -868,6 +877,7 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 		newW, newH := w.InnerSize()
 		repositionChidrenByAnchors(w, oldW, oldH, newW, newH)
 		w.lastInnerWidth, w.lastInnerHeight = newW, newH
+		w.applyLayout()
 		if w.onResize != nil {
 			w.onResize()
 		}
@@ -896,6 +906,9 @@ func (w *Window) onMsg(window w32.HWND, msg uint32, wParam, lParam uintptr) uint
 			if lParam == c.Handle() {
 				if s, ok := c.(*Slider); ok {
 					s.handleChange(wParam & 0xFFFF)
+				}
+				if sb, ok := c.(*ScrollBar); ok {
+					sb.handleScroll(int(wParam & 0xFFFF))
 				}
 			}
 		}
@@ -1083,6 +1096,7 @@ func (w *Window) createContents() {
 		addItems(menuBar, w.menu.items)
 		w32.SetMenu(w.handle, menuBar)
 		for _, m := range w.menuStrings {
+			m.applyExtra()
 			if m.Checked() {
 				m.SetChecked(true)
 			}
@@ -1129,6 +1143,10 @@ func (w *Window) onWM_COMMAND(wParam, lParam uintptr) {
 			w.shortcuts[index].f()
 		}
 	} else if lParam != 0 {
+		if h, ok := findControlByHandle(w.children, lParam).(commandHandler); ok {
+			h.handleCommand(int(wLo), int(wHi))
+			return
+		}
 		// control clicked
 		index := wParam & 0xFFFF
 		cmd := (wParam & 0xFFFF0000) >> 16
@@ -1140,6 +1158,11 @@ func (w *Window) onWM_COMMAND(wParam, lParam uintptr) {
 
 func (w *Window) onWM_NOTIFY(wParam, lParam uintptr) {
 	header := *((*w32.NMHDR)(unsafe.Pointer(lParam)))
+	if n, ok := findControlByHandle(w.children, uintptr(header.HwndFrom)).(notifyHandler); ok {
+		if n.handleNotify(header.Code, lParam) {
+			return
+		}
+	}
 	if header.Code == w32.DTN_DATETIMECHANGE {
 		if d, ok := findControlByHandle(w.children, uintptr(header.HwndFrom)).(*DatePicker); ok {
 			d.notify()
@@ -1610,4 +1633,18 @@ func (w *Window) Visible() bool {
 
 func (w *Window) Enabled() bool {
 	return true
+}
+
+// notifyHandler is implemented by controls that want to see the WM_NOTIFY
+// messages sent by their window. They return true when they handled the
+// notification completely.
+type notifyHandler interface {
+	handleNotify(code uint32, lParam uintptr) bool
+}
+
+// commandHandler is implemented by controls that need the WM_COMMAND
+// messages their window sends, with the command id (low word) and the
+// notification code (high word), instead of the index based default handling.
+type commandHandler interface {
+	handleCommand(id, code int)
 }

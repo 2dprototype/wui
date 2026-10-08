@@ -8,8 +8,11 @@ func NewCheckBox() *CheckBox {
 
 type CheckBox struct {
 	textControl
-	checked  bool
-	onChange func(bool)
+	checked       bool
+	onChange      func(bool)
+	threeState    bool
+	indeterminate bool
+	pushLike      bool
 }
 
 var _ Control = (*CheckBox)(nil)
@@ -31,8 +34,8 @@ func (*CheckBox) eatsTabs() bool {
 }
 
 func (c *CheckBox) create(id int) {
-	c.textControl.create(id, 0, "BUTTON", w32.WS_TABSTOP|w32.BS_AUTOCHECKBOX)
-	w32.SendMessage(c.handle, w32.BM_SETCHECK, toCheckState(c.checked), 0)
+	c.textControl.create(id, 0, "BUTTON", w32.WS_TABSTOP|c.styleBits())
+	w32.SendMessage(c.handle, w32.BM_SETCHECK, c.checkState(), 0)
 	c.themeForColor()
 }
 
@@ -74,7 +77,9 @@ func (c *CheckBox) SetOnChange(f func(checked bool)) {
 
 func (c *CheckBox) handleNotification(cmd uintptr) {
 	if cmd == w32.BN_CLICKED {
-		c.checked = w32.SendMessage(c.handle, w32.BM_GETCHECK, 0, 0) == w32.BST_CHECKED
+		st := w32.SendMessage(c.handle, w32.BM_GETCHECK, 0, 0)
+		c.checked = st == w32.BST_CHECKED
+		c.indeterminate = st == w32.BST_INDETERMINATE
 		if c.onChange != nil {
 			c.onChange(c.checked)
 		}

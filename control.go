@@ -85,6 +85,7 @@ type control struct {
 	popup      *PopupMenu
 
 	onDropFiles DropFilesFunc
+	ev          controlEvents
 	colorState
 }
 
@@ -132,6 +133,7 @@ func (c *control) create(id int, exStyle uint, className string, style uint) {
 		w32.EnableWindow(c.handle, false)
 	}
 	c.applyToolTip()
+	c.installEvents()
 }
 
 func (c *control) parentFontChanged() {}
@@ -369,10 +371,15 @@ type textEditControl struct {
 	textControl
 	cursorStart int
 	cursorEnd   int
+	cue         string
+	cueAlways   bool
+	numbersOnly bool
+	align       EditAlign
 }
 
 func (c *textEditControl) create(id int, exStyle uint, className string, style uint) {
 	c.textControl.create(id, exStyle, className, style)
+	c.applyEditExtras()
 	if c.cursorStart != 0 || c.cursorEnd != 0 {
 		c.setCursor(c.cursorStart, c.cursorEnd)
 	}

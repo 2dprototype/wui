@@ -12,6 +12,7 @@ type ProgressBar struct {
 	vertical     bool
 	movesForever bool
 	value        float64
+	state        ProgressState
 }
 
 var _ Control = (*ProgressBar)(nil)
@@ -52,6 +53,7 @@ func (p *ProgressBar) recreate() {
 		w32.SendMessage(p.handle, w32.PBM_SETRANGE32, 0, maxProgressBarValue)
 		p.SetValue(p.value)
 	}
+	p.applyState()
 }
 
 func (p *ProgressBar) Vertical() bool {

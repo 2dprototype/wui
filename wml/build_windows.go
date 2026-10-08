@@ -73,6 +73,15 @@ var factories = map[string]func() interface{}{
 	"FloatUpDown": func() interface{} { return wui.NewFloatUpDown() },
 	"ComboBox":    func() interface{} { return wui.NewComboBox() },
 	"ProgressBar": func() interface{} { return wui.NewProgressBar() },
+	"ListView":      func() interface{} { return wui.NewListView() },
+	"RichEdit":      func() interface{} { return wui.NewRichEdit() },
+	"LinkLabel":     func() interface{} { return wui.NewLinkLabel() },
+	"MonthCalendar": func() interface{} { return wui.NewMonthCalendar() },
+	"HotKeyEdit":    func() interface{} { return wui.NewHotKeyEdit() },
+	"IPAddressEdit": func() interface{} { return wui.NewIPAddressEdit() },
+	"ImageView":     func() interface{} { return wui.NewImageView() },
+	"ScrollPanel":   func() interface{} { return wui.NewScrollPanel() },
+	"ScrollBar":     func() interface{} { return wui.NewScrollBar(false) },
 }
 
 // methodKey and methodIndex cache reflection lookups. The method set of a

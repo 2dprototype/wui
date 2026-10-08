@@ -176,6 +176,7 @@ const (
 	fontElement = "Font"
 	itemElement = "Item"
 	tabElement  = "Tab"
+	columnElement = "Column"
 )
 
 // fontProps are the attributes of a <Font> element. They mirror wui.FontDesc.
@@ -248,13 +249,29 @@ func commonProps(plus ...PropSpec) []PropSpec {
 		pInt("Height", 0, sizeMax),
 		pInts("Size", 2, 0, sizeMax, 0, "Width", "Height"),
 		pInts("Bounds", 4, coordMin, coordMax, 2, "X", "Y", "Position", "Width", "Height", "Size"),
+		pBool("TabStop"),
 	}
 	return append(props, plus...)
 }
 
 // controlEvents are the events that every control has.
 func controlEvents(plus ...string) []string {
-	return append([]string{"OnResize", "OnDropFiles"}, plus...)
+	all := []string{
+		"OnResize", "OnDropFiles",
+		"OnMouseDown", "OnMouseUp", "OnDoubleClick", "OnMouseMove", "OnMouseWheel",
+		"OnMouseEnter", "OnMouseLeave", "OnKeyDown", "OnKeyUp", "OnChar", "OnFocus", "OnBlur",
+	}
+	seen := make(map[string]bool, len(all))
+	for _, e := range all {
+		seen[e] = true
+	}
+	for _, e := range plus {
+		if !seen[e] {
+			seen[e] = true
+			all = append(all, e)
+		}
+	}
+	return all
 }
 
 func textProp() PropSpec { return pStr("Text").withSetter("SetText") }
@@ -309,11 +326,17 @@ func buildTypes() map[string]*TypeSpec {
 				"OnShow", "OnClose", "OnCanClose", "OnResize", "OnDropFiles",
 				"OnMouseMove", "OnMouseWheel", "OnMouseDown", "OnMouseUp",
 				"OnKeyDown", "OnKeyUp", "OnChar",
+				"OnMove", "OnActivate", "OnStateChange", "OnDPIChanged",
 			},
 		},
 		{
-			Name:   "Button",
-			Props:  commonProps(textProp()),
+			Name: "Button",
+			Props: commonProps(
+				textProp(),
+				pEnum("Kind", "Normal", "Split", "CommandLink"),
+				pStr("Note"),
+				pBool("Default"),
+			),
 			Events: controlEvents("OnClick", "OnTabFocus"),
 		},
 		{
@@ -329,6 +352,8 @@ func buildTypes() map[string]*TypeSpec {
 			Props: commonProps(append([]PropSpec{
 				textProp(),
 				pBool("Checked"),
+				pBool("ThreeState"),
+				pBool("PushLike"),
 			}, colors()...)...),
 			Events: controlEvents("OnChange", "OnTabFocus"),
 		},
@@ -405,6 +430,8 @@ func buildTypes() map[string]*TypeSpec {
 				pInt("CharacterLimit", 0, int32Max),
 				pBool("IsPassword"),
 				pBool("ReadOnly"),
+				pBool("NumbersOnly"),
+				pEnum("TextAlign", "Left", "Center", "Right"),
 			}, colors()...)...),
 			Events: controlEvents("OnTextChange", "OnTabFocus"),
 		},
@@ -416,6 +443,8 @@ func buildTypes() map[string]*TypeSpec {
 				pInt("CharacterLimit", 0, int32Max),
 				pBool("WritesTabs"),
 				pBool("ReadOnly"),
+				pBool("NumbersOnly"),
+				pEnum("TextAlign", "Left", "Center", "Right"),
 			}, colors()...)...),
 			Events: controlEvents("OnTextChange", "OnTabFocus"),
 		},
@@ -444,19 +473,96 @@ func buildTypes() map[string]*TypeSpec {
 		{
 			Name: "ComboBox",
 			Props: commonProps(append([]PropSpec{
+				pBool("Editable"),
 				pList("Items", itemElement),
 				pInt("SelectedIndex", -1, 65535),
 			}, colors()...)...),
-			Events: controlEvents("OnChange", "OnTabFocus"),
+			Events: controlEvents("OnChange", "OnTextChange", "OnTabFocus"),
 		},
 		{
 			Name: "ProgressBar",
 			Props: commonProps(
 				pBool("Vertical"),
 				pBool("MovesForever"),
+				pEnum("State", "Normal", "Error", "Paused"),
 				pFloat("Value", 0, 1),
 			),
 			Events: controlEvents(),
+		},
+		{
+			Name: "ListView",
+			Props: commonProps(
+				pEnum("View", "Details", "List", "Icons", "SmallIcons", "Tiles"),
+				pBool("MultiSelect"),
+				pBool("Editable"),
+				pBool("HeaderVisible"),
+				pBool("CheckBoxes"),
+				pBool("FullRowSelect"),
+				pBool("GridLines"),
+				pBool("Sortable"),
+				pList("Columns", columnElement),
+				pList("Items", itemElement),
+			),
+			Events: controlEvents("OnSelect", "OnActivate", "OnColumnClick", "OnTabFocus"),
+		},
+		{
+			Name: "RichEdit",
+			Props: commonProps(
+				textProp(),
+				pBool("WordWrap"),
+				pBool("ReadOnly"),
+				pBool("AutoDetectLinks"),
+				pBool("WritesTabs"),
+				pColor("BackgroundColor"),
+			),
+			Events: controlEvents("OnTextChange", "OnSelectionChange", "OnLinkClick", "OnTabFocus"),
+		},
+		{
+			Name:   "LinkLabel",
+			Props:  commonProps(textProp()),
+			Events: controlEvents("OnClick", "OnTabFocus"),
+		},
+		{
+			Name:   "MonthCalendar",
+			Props:  commonProps(pBool("ShowWeekNumbers")),
+			Events: controlEvents("OnChange", "OnTabFocus"),
+		},
+		{
+			Name:   "HotKeyEdit",
+			Props:  commonProps(),
+			Events: controlEvents("OnChange", "OnTabFocus"),
+		},
+		{
+			Name:   "IPAddressEdit",
+			Props:  commonProps(),
+			Events: controlEvents("OnChange", "OnTabFocus"),
+		},
+		{
+			Name: "ImageView",
+			Props: commonProps(
+				pEnum("Mode", "Normal", "Center", "Stretch", "Fit", "Fill"),
+				pColor("BackColor"),
+			),
+			Events: controlEvents(),
+		},
+		{
+			Name:      "ScrollPanel",
+			Container: true,
+			Props: commonProps(
+				pEnum("BorderStyle", "None", "SingleLine", "Sunken", "SunkenThick", "Raised"),
+				pColor("BackgroundColor"),
+			),
+			Events: controlEvents(),
+		},
+		{
+			Name: "ScrollBar",
+			Props: commonProps(
+				pBool("Vertical"),
+				pInts("Range", 2, int32Min, int32Max, 0),
+				pInt("Page", 0, int32Max),
+				pInt("Position", int32Min, int32Max),
+			),
+			Events: controlEvents("OnChange"),
 		},
 	}
 

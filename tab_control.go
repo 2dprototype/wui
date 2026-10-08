@@ -16,9 +16,12 @@ func NewTabControl() *TabControl {
 
 type TabControl struct {
 	textControl
-	tabs     []string
-	selected int
-	onChange func(index int)
+	tabs      []string
+	tabImages []int
+	pages     []Control
+	images    *ImageList
+	selected  int
+	onChange  func(index int)
 }
 
 var _ Control = (*TabControl)(nil)
@@ -29,18 +32,26 @@ func (*TabControl) eatsTabs() bool { return false }
 
 func (t *TabControl) create(id int) {
 	t.textControl.create(id, 0, w32.TAB_CLASS, w32.WS_TABSTOP|w32.WS_CLIPSIBLINGS)
+	if t.images != nil {
+		w32.SendMessage(t.handle, w32.TCM_SETIMAGELIST, 0, t.images.handle)
+	}
 	for i, title := range t.tabs {
 		t.insertTab(i, title)
 	}
 	if len(t.tabs) > 0 {
 		w32.SendMessage(t.handle, w32.TCM_SETCURSEL, uintptr(t.selected), 0)
 	}
+	t.showPages()
 }
 
 func (t *TabControl) insertTab(index int, title string) {
 	item := w32.TCITEM{
 		Mask:    w32.TCIF_TEXT,
 		PszText: syscall.StringToUTF16Ptr(title),
+	}
+	if img := t.imageFor(index); img >= 0 && t.images != nil {
+		item.Mask |= 2 // TCIF_IMAGE
+		item.IImage = int32(img)
 	}
 	w32.SendMessage(
 		t.handle, w32.TCM_INSERTITEMW, uintptr(index), uintptr(unsafe.Pointer(&item)),
@@ -49,10 +60,7 @@ func (t *TabControl) insertTab(index int, title string) {
 
 // AddTab appends a tab with the given title.
 func (t *TabControl) AddTab(title string) {
-	t.tabs = append(t.tabs, title)
-	if t.handle != 0 {
-		t.insertTab(len(t.tabs)-1, title)
-	}
+	t.appendTab(title, -1, nil)
 }
 
 // Tabs returns the titles of all tabs.
@@ -63,6 +71,11 @@ func (t *TabControl) Tabs() []string {
 // SetTabs replaces all tabs.
 func (t *TabControl) SetTabs(titles []string) {
 	t.tabs = append([]string(nil), titles...)
+	t.tabImages = make([]int, len(titles))
+	for i := range t.tabImages {
+		t.tabImages[i] = -1
+	}
+	t.pages = make([]Control, len(titles))
 	if t.selected >= len(t.tabs) {
 		t.selected = 0
 	}
@@ -95,6 +108,7 @@ func (t *TabControl) SetSelectedIndex(i int) {
 	if t.handle != 0 {
 		w32.SendMessage(t.handle, w32.TCM_SETCURSEL, uintptr(i), 0)
 	}
+	t.showPages()
 	if t.onChange != nil {
 		t.onChange(i)
 	}
@@ -127,6 +141,7 @@ func (t *TabControl) notify(code uint32) {
 	sel := int(int32(w32.SendMessage(t.handle, w32.TCM_GETCURSEL, 0, 0)))
 	if sel >= 0 && sel != t.selected {
 		t.selected = sel
+		t.showPages()
 		if t.onChange != nil {
 			t.onChange(sel)
 		}

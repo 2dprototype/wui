@@ -70,6 +70,13 @@ type TreeView struct {
 	nodes         map[uintptr]*TreeNode
 	onSelect      func(*TreeNode)
 	onDoubleClick func(*TreeNode)
+	images        *ImageList
+	checkBoxes    bool
+	editable      bool
+	onExpand      func(*TreeNode)
+	onCollapse    func(*TreeNode)
+	onCheck       func(*TreeNode, bool)
+	onLabelEdit   func(*TreeNode, string) bool
 }
 
 var _ Control = (*TreeView)(nil)
@@ -87,14 +94,18 @@ type TreeNode struct {
 	children []*TreeNode
 	text     string
 	handle   uintptr
+	image    int
+	selImage int
+	checked  bool
 }
 
 func (t *TreeView) create(id int) {
 	t.textControl.create(
 		id, w32.WS_EX_CLIENTEDGE, treeViewClassName,
-		w32.WS_TABSTOP|tvsHasButtons|tvsHasLines|tvsLinesAtRoot|tvsShowSelAlways,
+		w32.WS_TABSTOP|tvsHasButtons|tvsHasLines|tvsLinesAtRoot|tvsShowSelAlways|t.extraStyle(),
 	)
 	t.nodes = make(map[uintptr]*TreeNode)
+	t.applyImages()
 	for _, r := range t.roots {
 		t.insert(r, tviRoot)
 	}
@@ -107,8 +118,16 @@ func (t *TreeView) insert(n *TreeNode, parent uintptr) {
 	is.hInsertAfter = tviLast
 	is.item.mask = tvifText
 	is.item.pszText = syscall.StringToUTF16Ptr(n.text)
+	if t.images != nil {
+		is.item.mask |= tvifImage | tvifSelectedImage
+		is.item.iImage = int32(n.image)
+		is.item.iSelectedImage = int32(n.selImage)
+	}
 	n.handle = w32.SendMessage(t.handle, tvmInsertItemW, 0, uintptr(unsafe.Pointer(&is)))
 	t.nodes[n.handle] = n
+	if t.checkBoxes && n.checked {
+		t.setNodeChecked(n, true)
+	}
 	for _, c := range n.children {
 		t.insert(c, n.handle)
 	}

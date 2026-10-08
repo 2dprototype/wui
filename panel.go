@@ -15,6 +15,7 @@ type Panel struct {
 	children []Control
 	border   PanelBorderStyle
 	font     *Font
+	layout   Layout
 }
 
 var _ Control = (*Panel)(nil)
@@ -112,6 +113,13 @@ func (p *Panel) create(id int) {
 		case w32.WM_NOTIFY:
 			p.onWM_NOTIFY(wParam, lParam)
 			return 0
+		case w32.WM_HSCROLL, w32.WM_VSCROLL:
+			if lParam != 0 && p.parent != nil {
+				// From a scroll bar or slider inside the panel, pass it on to
+				// the window which knows the controls.
+				return w32.SendMessage(p.parent.getHandle(), msg, wParam, lParam)
+			}
+			return w32.DefSubclassProc(window, msg, wParam, lParam)
 		case w32.WM_CTLCOLORSTATIC, w32.WM_CTLCOLOREDIT, w32.WM_CTLCOLORBTN, w32.WM_CTLCOLORLISTBOX:
 			if r, ok := ctlColor(p.children, containerBackground(p), msg, wParam, lParam); ok {
 				return r
@@ -124,6 +132,7 @@ func (p *Panel) create(id int) {
 	for _, c := range p.children {
 		c.create(p.getIDFor(c))
 	}
+	p.applyLayout()
 }
 
 func (p *Panel) Add(c Control) {
@@ -132,6 +141,7 @@ func (p *Panel) Add(c Control) {
 	if p.handle != 0 {
 		c.create(p.getIDFor(c))
 	}
+	p.applyLayout()
 }
 
 func (p *Panel) Remove(c Control) {
@@ -140,6 +150,7 @@ func (p *Panel) Remove(c Control) {
 			child.setParent(nil)
 			child.destroy()
 			p.children = append(p.children[:i], p.children[i+1:]...)
+			p.applyLayout()
 			return
 		}
 	}
@@ -297,6 +308,7 @@ func (p *Panel) SetBounds(x, y, width, height int) {
 	p.control.SetBounds(x, y, width, height)
 	_, _, newW, newH := p.InnerBounds()
 	repositionChidrenByAnchors(p, oldW, oldH, newW, newH)
+	p.applyLayout()
 }
 
 // NOTE that we need to re-write all the Set... functions here to make them go

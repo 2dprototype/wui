@@ -65,6 +65,9 @@ type MenuString struct {
 	text    string
 	checked bool
 	onClick func()
+	disabled bool
+	radio    bool
+	image    w32.HBITMAP
 }
 
 func (*MenuString) isMenuItem() {}
@@ -84,16 +87,7 @@ func (m *MenuString) Checked() bool {
 
 func (m *MenuString) SetChecked(c bool) {
 	m.checked = c
-	if m.menu != 0 {
-		var info w32.MENUITEMINFO
-		info.Mask = w32.MIIM_STATE
-		if c {
-			info.State = w32.MFS_CHECKED
-		} else {
-			info.State = w32.MFS_UNCHECKED
-		}
-		w32.SetMenuItemInfo(m.menu, m.id, false, &info)
-	}
+	m.applyState()
 }
 
 func (m *MenuString) Text() string {
