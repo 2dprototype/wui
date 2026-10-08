@@ -154,8 +154,18 @@ func main() {
 		getter    string // if set, the property is only shown when the control lists it
 		update    func()
 		rightType func(t reflect.Type) bool
+		// visibleFor, if set, decides whether the property is shown for a
+		// control. It replaces the check of the setter.
+		visibleFor func(c interface{}) bool
+		// isExtra marks the editors of the extra properties of extras.go.
+		isExtra bool
+		// group overrides the group that the setter name gives.
+		group string
 	}
 	var updateProperties func()
+	// updatingProps is true while the editors are filled from the control,
+	// so that this does not count as an edit.
+	updatingProps := false
 
 	const propMargin = 2
 
@@ -613,10 +623,373 @@ func main() {
 		}
 	}
 
+	// Editors for the extra properties, which the designer keeps itself, see
+	// extras.go.
+	hasExtra := func(name string) func(c interface{}) bool {
+		return func(c interface{}) bool {
+			_, ok := findExtra(c, name)
+			return ok
+		}
+	}
+	// extraEdited is called after the value of an extra property changed.
+	extraEdited := func() {
+		preview.Paint()
+		markModified()
+	}
+
+	exBoolProp := func(label, name string) uiProp {
+		c, p := boolPanel(w, label)
+		c.SetOnChange(func(on bool) {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, strconv.FormatBool(on))
+				extraEdited()
+			}
+		})
+		update := func() {
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			on := getExtra(active, s) == "true"
+			if c.Checked() != on {
+				updatingProps = true
+				c.SetChecked(on)
+				updatingProps = false
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	exStringProp := func(label, name string) uiProp {
+		t, p := stringPanel(w, label)
+		t.SetOnTextChange(func() {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, t.Text())
+				extraEdited()
+			}
+		})
+		update := func() {
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			if v := getExtra(active, s); t.Text() != v {
+				updatingProps = true
+				t.SetText(v)
+				updatingProps = false
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	exIntProp := func(label, name string) uiProp {
+		spec, _ := anyExtraSpec(name)
+		n, p := intPanel(w, label, spec.min, spec.max)
+		n.SetOnValueChange(func(v int) {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, strconv.Itoa(v))
+				extraEdited()
+			}
+		})
+		update := func() {
+			if _, ok := findExtra(active, name); !ok {
+				return
+			}
+			nums := extraInts(active, name)
+			if len(nums) > 0 && n.Value() != nums[0] {
+				updatingProps = true
+				n.SetValue(nums[0])
+				updatingProps = false
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	// exIntsProp edits two numbers, for example the smallest window size.
+	exIntsProp := func(label, name string) uiProp {
+		l := wui.NewLabel()
+		l.SetText(label)
+		l.SetAlignment(wui.AlignRight)
+		a := wui.NewIntUpDown()
+		a.SetMinMax(-1000000, 1000000)
+		a.SetBounds(100, propMargin, 43, 22)
+		b := wui.NewIntUpDown()
+		b.SetMinMax(-1000000, 1000000)
+		b.SetBounds(147, propMargin, 43, 22)
+		l.SetBounds(0, propMargin-1, 95, a.Height())
+		p := wui.NewPanel()
+		p.SetSize(195, a.Height()+2*propMargin)
+		w.Add(p)
+		p.Add(l)
+		p.Add(a)
+		p.Add(b)
+		changed := func(int) {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, fmt.Sprintf("%d,%d", a.Value(), b.Value()))
+				extraEdited()
+			}
+		}
+		a.SetOnValueChange(changed)
+		b.SetOnValueChange(changed)
+		update := func() {
+			if _, ok := findExtra(active, name); !ok {
+				return
+			}
+			nums := extraInts(active, name)
+			if len(nums) < 2 {
+				return
+			}
+			updatingProps = true
+			if a.Value() != nums[0] {
+				a.SetValue(nums[0])
+			}
+			if b.Value() != nums[1] {
+				b.SetValue(nums[1])
+			}
+			updatingProps = false
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	exEnumProp := func(label, name string) uiProp {
+		spec, _ := anyExtraSpec(name)
+		c := wui.NewComboBox()
+		for _, item := range spec.enum {
+			c.AddItem(item)
+		}
+		c.SetBounds(100, propMargin, 90, 22)
+		l := wui.NewLabel()
+		l.SetText(label)
+		l.SetAlignment(wui.AlignRight)
+		l.SetBounds(0, propMargin-1, 95, c.Height())
+		p := wui.NewPanel()
+		p.SetSize(195, c.Height()+2*propMargin)
+		w.Add(p)
+		p.Add(l)
+		p.Add(c)
+		c.SetOnChange(func(index int) {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok && index >= 0 && index < len(s.enum) {
+				setExtra(active, s, s.enum[index])
+				extraEdited()
+			}
+		})
+		update := func() {
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			v := getExtra(active, s)
+			for i, item := range s.enum {
+				if item == v && c.SelectedIndex() != i {
+					updatingProps = true
+					c.SetSelectedIndex(i)
+					updatingProps = false
+				}
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	exColorProp := func(label, name string) uiProp {
+		l := wui.NewLabel()
+		l.SetText(label)
+		l.SetAlignment(wui.AlignRight)
+		l.SetBounds(0, propMargin-1, 95, 22)
+		swatch := wui.NewPaintBox()
+		swatch.SetBounds(100, propMargin, 48, 22)
+		reset := wui.NewButton()
+		reset.SetText("Reset")
+		reset.SetBounds(152, propMargin, 40, 22)
+		p := wui.NewPanel()
+		p.SetSize(195, 22+2*propMargin)
+		w.Add(p)
+		p.Add(l)
+		p.Add(swatch)
+		p.Add(reset)
+		var cr, cg, cb uint8
+		isSet := false
+		swatch.SetOnPaint(func(c *wui.Canvas) {
+			sw, sh := c.Size()
+			c.FillRect(0, 0, sw, sh, wui.RGB(240, 240, 240))
+			if isSet {
+				c.FillRect(2, 2, sw-4, sh-4, wui.RGB(cr, cg, cb))
+			} else {
+				c.TextOut(6, 4, "auto", wui.RGB(90, 90, 90))
+			}
+			c.DrawRect(0, 0, sw, sh, wui.RGB(100, 100, 100))
+		})
+		swatch.SetOnMouseDown(func(x, y int, button wui.MouseButton) {
+			if active == nil {
+				return
+			}
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			dlg := wui.NewColorDialog()
+			dlg.SetColor(wui.RGB(cr, cg, cb))
+			if dlg.Execute(w) {
+				c := dlg.Color()
+				setExtra(active, s, fmt.Sprintf("#%02X%02X%02X", c.R(), c.G(), c.B()))
+				updateProperties()
+				extraEdited()
+			}
+		})
+		reset.SetOnClick(func() {
+			if active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, s.def)
+				updateProperties()
+				extraEdited()
+			}
+		})
+		update := func() {
+			if _, ok := findExtra(active, name); !ok {
+				return
+			}
+			cr, cg, cb, isSet = extraColor(active, name)
+			reset.SetEnabled(isSet)
+			swatch.Paint()
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	// exListProp edits a list with one line per entry.
+	exListProp := func(label, name string) uiProp {
+		l := wui.NewLabel()
+		l.SetBounds(10, 5, 180, 13)
+		l.SetText(label)
+		l.SetAlignment(wui.AlignCenter)
+		list := wui.NewTextEdit()
+		list.SetBounds(10, 20, 180, 80)
+		list.SetWritesTabs(true)
+		p := wui.NewPanel()
+		p.SetSize(195, list.Height()+2*propMargin+18)
+		w.Add(p)
+		p.Add(l)
+		p.Add(list)
+		list.SetOnTextChange(func() {
+			if updatingProps || active == nil {
+				return
+			}
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			var items []string
+			for _, line := range strings.Split(strings.Replace(list.Text(), "\r", "", -1), "\n") {
+				if strings.TrimSpace(line) != "" {
+					items = append(items, line)
+				}
+			}
+			l.SetText(fmt.Sprintf("%s (%d)", label, len(items)))
+			setExtra(active, s, strings.Join(items, "\n"))
+			extraEdited()
+		})
+		update := func() {
+			if _, ok := findExtra(active, name); !ok {
+				return
+			}
+			items := extraLines(active, name)
+			l.SetText(fmt.Sprintf("%s (%d)", label, len(items)))
+			text := strings.Join(items, "\r\n")
+			if len(items) > 0 {
+				text += "\r\n"
+			}
+			if list.Text() != text {
+				updatingProps = true
+				list.SetText(text)
+				updatingProps = false
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	// exFileProp edits the path of a file with a button that opens the file
+	// dialog.
+	exFileProp := func(label, name string) uiProp {
+		t, p := stringPanel(w, label)
+		t.SetWidth(62)
+		browse := wui.NewButton()
+		browse.SetText("...")
+		browse.SetBounds(164, propMargin, 26, 22)
+		p.Add(browse)
+		t.SetOnTextChange(func() {
+			if updatingProps || active == nil {
+				return
+			}
+			if s, ok := findExtra(active, name); ok {
+				setExtra(active, s, t.Text())
+				extraEdited()
+			}
+		})
+		browse.SetOnClick(func() {
+			if active == nil {
+				return
+			}
+			open := wui.NewFileOpenDialog()
+			open.SetTitle("Choose an image")
+			open.AddFilter("Images", ".png", ".jpg", ".jpeg", ".gif")
+			open.AddFilter("All files", "*")
+			if accept, path := open.ExecuteSingleSelection(w); accept {
+				t.SetText(path)
+			}
+		})
+		update := func() {
+			s, ok := findExtra(active, name)
+			if !ok {
+				return
+			}
+			if v := getExtra(active, s); t.Text() != v {
+				updatingProps = true
+				t.SetText(v)
+				updatingProps = false
+			}
+		}
+		return uiProp{panel: p, setter: "Set" + name, update: update, visibleFor: hasExtra(name), isExtra: true}
+	}
+
+	// only limits a property to the controls for which f is true.
+	only := func(p uiProp, f func(c interface{}) bool) uiProp {
+		p.visibleFor = f
+		return p
+	}
+	inGroup := func(p uiProp, g string) uiProp {
+		p.group = g
+		return p
+	}
+	isWindow := func(c interface{}) bool { _, ok := c.(*wui.Window); return ok }
+	isProgress := func(c interface{}) bool { _, ok := c.(*wui.ProgressBar); return ok }
+	isDate := func(c interface{}) bool { _, ok := c.(*wui.DatePicker); return ok }
+	isImage := func(c interface{}) bool { _, ok := c.(*wui.ImageView); return ok }
+	isCombo := func(c interface{}) bool { _, ok := c.(*wui.ComboBox); return ok }
+	isTabs := func(c interface{}) bool { _, ok := c.(*wui.TabControl); return ok }
+
 	uiProps := []uiProp{
 		stringProp("Title", "Title"),
 		stringProp("Text", "Text"),
-		enumProp("Window State", "State", "Normal", "Maximized", "Minimized"),
+		only(enumProp("Window State", "State", "Normal", "Maximized", "Minimized"), isWindow),
+		inGroup(only(enumProp("State", "State", "Normal", "Error", "Paused"), isProgress), "Appearance"),
+		boolProp("Center On Show", "CenterOnShow"),
+		exIntsProp("Min Size", "MinSize"),
+		exIntsProp("Max Size", "MaxSize"),
 		boolProp("Min Button", "HasMinButton"),
 		boolProp("Max Button", "HasMaxButton"),
 		boolProp("Close Button", "HasCloseButton"),
@@ -671,9 +1044,41 @@ func main() {
 		boolProp("Is Password", "IsPassword"),
 		boolProp("Read Only", "ReadOnly"),
 		boolProp("Writes Tabs", "WritesTabs"),
-		stringListProp("Items", "Items"),
-		stringListProp("Tabs", "Tabs"),
-		enumProp("Date Mode", "Mode", "Short Date", "Long Date", "Time"),
+		only(stringListProp("Items", "Items"), isCombo),
+		only(stringListProp("Tabs", "Tabs"), isTabs),
+		only(enumProp("Date Mode", "Mode", "Short Date", "Long Date", "Time"), isDate),
+		only(enumProp("Image Mode", "Mode", "Normal", "Center", "Stretch", "Fit", "Fill"), isImage),
+		enumProp("List View", "View", "Details", "List", "Icons", "Small Icons", "Tiles"),
+		boolProp("Multi Select", "MultiSelect"),
+		boolProp("Three State", "ThreeState"),
+		boolProp("Editable", "Editable"),
+		boolProp("Tab Stop", "TabStop"),
+		exEnumProp("Kind", "Kind"),
+		exStringProp("Note", "Note"),
+		exBoolProp("Default Button", "Default"),
+		exBoolProp("Push Like", "PushLike"),
+		exBoolProp("Numbers Only", "NumbersOnly"),
+		exEnumProp("Text Align", "TextAlign"),
+		exBoolProp("Header Visible", "HeaderVisible"),
+		exBoolProp("Full Row Select", "FullRowSelect"),
+		exBoolProp("Grid Lines", "GridLines"),
+		exBoolProp("Check Boxes", "CheckBoxes"),
+		exBoolProp("Editable", "Editable"),
+		exBoolProp("Sortable", "Sortable"),
+		exBoolProp("Word Wrap", "WordWrap"),
+		exBoolProp("Detect Links", "AutoDetectLinks"),
+		exBoolProp("Writes Tabs", "WritesTabs"),
+		exBoolProp("Week Numbers", "ShowWeekNumbers"),
+		exBoolProp("Vertical", "Vertical"),
+		exIntsProp("Range", "Range"),
+		exIntProp("Page", "Page"),
+		exColorProp("Background", "BackgroundColor"),
+		exColorProp("Back Color", "BackColor"),
+		exFileProp("Image File", "ImageFile"),
+		exListProp("Columns", "Columns"),
+		exListProp("Rows", "Items"),
+		exListProp("Nodes", "Nodes"),
+		exStringProp("Tool Tip", "ToolTip"),
 		intProp("Selected Index", "SelectedIndex", -1, math.MaxInt32),
 		boolProp("Vertical", "Vertical"),
 		boolProp("Moves Forever", "MovesForever"),
@@ -854,6 +1259,42 @@ func main() {
 	statusTemplate.SetText("Status")
 	statusTemplate.SetBounds(20, 650, 150, 22)
 
+	listViewTemplate := wui.NewListView()
+	listViewTemplate.SetBounds(20, 680, 150, 80)
+	setExtraByName(listViewTemplate, "Columns", "Name\nSize")
+	setExtraByName(listViewTemplate, "Items", "Item 1\nItem 2")
+
+	richEditTemplate := wui.NewRichEdit()
+	richEditTemplate.SetText("Rich Edit")
+	richEditTemplate.SetBounds(20, 770, 150, 50)
+
+	linkLabelTemplate := wui.NewLinkLabel()
+	linkLabelTemplate.SetText("<a href=\"https://example.com\">Link Label</a>")
+	linkLabelTemplate.SetBounds(20, 830, 150, 17)
+
+	monthCalendarTemplate := wui.NewMonthCalendar()
+	monthCalendarTemplate.SetBounds(20, 855, 190, 160)
+
+	hotKeyTemplate := wui.NewHotKeyEdit()
+	hotKeyTemplate.SetBounds(20, 1020, 150, 22)
+
+	ipTemplate := wui.NewIPAddressEdit()
+	ipTemplate.SetBounds(20, 1050, 150, 22)
+
+	imageViewTemplate := wui.NewImageView()
+	imageViewTemplate.SetBounds(20, 1080, 100, 60)
+
+	scrollPanelTemplate := wui.NewScrollPanel()
+	scrollPanelTemplate.SetBounds(20, 1150, 150, 60)
+	scrollPanelTemplate.SetBorderStyle(wui.PanelBorderSingleLine)
+
+	scrollBarTemplate := wui.NewScrollBar(false)
+	scrollBarTemplate.SetBounds(20, 1220, 150, 17)
+
+	treeViewTemplate := wui.NewTreeView()
+	treeViewTemplate.SetBounds(20, 1245, 150, 80)
+	setExtraByName(treeViewTemplate, "Nodes", "Root\n  Child 1\n  Child 2")
+
 	// The toolbox is split into collapsible groups so everything stays
 	// reachable on small screens.
 	type paletteGroup struct {
@@ -862,10 +1303,12 @@ func main() {
 		open  bool
 	}
 	paletteGroups := []*paletteGroup{
-		{"Containers", []wui.Control{panelTemplate, groupBoxTemplate, tabTemplate, statusTemplate}, true},
-		{"Text & Input", []wui.Control{textEditTemplate, editLineTemplate, comboTemplate, intTemplate, floatTemplate, dateTemplate}, false},
-		{"Buttons", []wui.Control{buttonTemplate, checkBoxTemplate, radioButtonTemplate}, false},
-		{"Display", []wui.Control{labelTemplate, paintBoxTemplate, progressTemplate, sliderTemplate}, false},
+		{"Containers", []wui.Control{panelTemplate, groupBoxTemplate, tabTemplate, scrollPanelTemplate, statusTemplate}, true},
+		{"Text", []wui.Control{textEditTemplate, editLineTemplate, richEditTemplate}, false},
+		{"Input", []wui.Control{comboTemplate, intTemplate, floatTemplate, dateTemplate, monthCalendarTemplate, hotKeyTemplate, ipTemplate}, false},
+		{"Buttons", []wui.Control{buttonTemplate, checkBoxTemplate, radioButtonTemplate, linkLabelTemplate}, false},
+		{"Display", []wui.Control{labelTemplate, paintBoxTemplate, imageViewTemplate, progressTemplate, sliderTemplate, scrollBarTemplate}, false},
+		{"Lists", []wui.Control{listViewTemplate, treeViewTemplate}, false},
 	}
 	var visibleTemplates []wui.Control
 	var paletteHeaders []rectangle
@@ -968,28 +1411,27 @@ func main() {
 	white := wui.RGB(255, 255, 255)
 	black := wui.RGB(0, 0, 0)
 
-	editOnPaint := wui.NewButton()
-	editOnPaint.SetText("OnPaint")
-	editOnPaint.SetBounds(105, 500, 85, 25)
-	editOnPaint.SetVisible(false)
-	w.Add(editOnPaint)
+	// Events: a list of the events of the selected control and a button that
+	// opens the code of the handler. Events that have code are marked with *.
+	evCombo := wui.NewComboBox()
+	evCombo.SetBounds(10, 4, 175, 22)
+	evEdit := wui.NewButton()
+	evEdit.SetText("Edit Code...")
+	evEdit.SetBounds(10, 30, 175, 25)
+	evPanel := wui.NewPanel()
+	evPanel.SetBounds(0, 0, 195, 62)
+	evPanel.Add(evCombo)
+	evPanel.Add(evEdit)
+	evPanel.SetVisible(false)
+	w.Add(evPanel)
+	var evNames []string
+	var refreshEvents func()
 
 	name.SetOnTextChange(func() {
 		names[active] = name.Text()
 		markModified()
 	})
 	
-	editOnClick := wui.NewButton()
-	editOnClick.SetText("OnClick")
-	editOnClick.SetBounds(105, 500, 85, 25)
-	editOnClick.SetVisible(false)
-	w.Add(editOnClick)
-
-	editOnDrop := wui.NewButton()
-	editOnDrop.SetText("OnDropFiles")
-	editOnDrop.SetBounds(105, 500, 85, 25)
-	editOnDrop.SetVisible(false)
-	w.Add(editOnDrop)
 
 	// openEventEditor lets the user edit the Go code of an event handler.
 	openEventEditor := func(evName, defaultCode string) {
@@ -1035,6 +1477,9 @@ func main() {
 			events[ev] = strings.Replace(code.Text(), "\r", "", -1)
 			dlg.Close()
 			markModified()
+			if active == target {
+				refreshEvents()
+			}
 		})
 		dlg.Add(ok)
 
@@ -1049,20 +1494,34 @@ func main() {
 		dlg.ShowModal()
 	}
 
-	editOnPaint.SetOnClick(func() {
-		if _, valid := active.(*wui.PaintBox); !valid {
+	refreshEvents = func() {
+		evNames = evNames[:0]
+		var items []string
+		if active != nil {
+			for _, ev := range eventsOf(active) {
+				label := ev
+				if !isEmptyHandler(events[event{control: active, name: ev}]) {
+					label += " *"
+				}
+				evNames = append(evNames, ev)
+				items = append(items, label)
+			}
+		}
+		keep := evCombo.SelectedIndex()
+		evCombo.SetItems(items)
+		if len(items) > 0 {
+			if keep < 0 || keep >= len(items) {
+				keep = 0
+			}
+			evCombo.SetSelectedIndex(keep)
+		}
+	}
+	evEdit.SetOnClick(func() {
+		i := evCombo.SelectedIndex()
+		if active == nil || i < 0 || i >= len(evNames) {
 			return
 		}
-		openEventEditor("OnPaint", "func(canvas *wui.Canvas) {\n\t\n}")
-	})
-	editOnClick.SetOnClick(func() {
-		if _, valid := active.(*wui.Button); !valid {
-			return
-		}
-		openEventEditor("OnClick", "func() {\n\t\n}")
-	})
-	editOnDrop.SetOnClick(func() {
-		openEventEditor("OnDropFiles", "func(files []string, x, y int) {\n\t\n}")
+		openEventEditor(evNames[i], eventTemplate(active, evNames[i]))
 	})
 
 	updateProperties = func() {
@@ -1090,7 +1549,7 @@ func main() {
 		propScroll               int
 		propShown                = make([]bool, len(uiProps))
 		fontShown                bool
-		evShown                  [3]bool
+		eventsShown              bool
 		panX, panY               int
 		layoutProps, layoutMain  func()
 	)
@@ -1101,8 +1560,11 @@ func main() {
 	groupOf := func(setter string) string {
 		switch setter {
 		case "SetTitle", "SetText", "SetEnabled", "SetVisible", "SetChecked", "SetValue",
-			"SetItems", "SetTabs", "SetMode", "SetSelectedIndex":
+			"SetItems", "SetTabs", "SetSelectedIndex", "SetNote", "SetColumns", "SetNodes", "SetToolTip":
 			return "General"
+		case "SetMode", "SetView", "SetKind", "SetTextAlign", "SetBackColor", "SetGridLines",
+			"SetHeaderVisible", "SetImageFile":
+			return "Appearance"
 		case "SetHorizontalAnchor", "SetVerticalAnchor", "SetX", "SetY", "SetWidth", "SetHeight",
 			"SetInnerX", "SetInnerY", "SetInnerWidth", "SetInnerHeight":
 			return "Layout"
@@ -1111,7 +1573,8 @@ func main() {
 			return "Appearance"
 		case "SetState", "SetHasMinButton", "SetHasMaxButton", "SetHasCloseButton", "SetHasBorder",
 			"SetResizable", "SetTopMost", "SetShowInTaskbar", "SetDragByBackground", "SetAcceptFiles",
-			"SetTransparent", "SetTransparentColor", "SetCornerRadius":
+			"SetTransparent", "SetTransparentColor", "SetCornerRadius", "SetCenterOnShow",
+			"SetMinSize", "SetMaxSize":
 			return "Window Options"
 		case "SetTrayEnabled", "SetTrayToolTip", "SetMinimizeToTray", "SetCloseToTray":
 			return "Tray"
@@ -1121,6 +1584,9 @@ func main() {
 	propGroup := make([]string, len(uiProps))
 	for i, prop := range uiProps {
 		propGroup[i] = groupOf(prop.setter)
+		if prop.group != "" {
+			propGroup[i] = prop.group
+		}
 	}
 	groupOpen := map[string]bool{"General": true}
 	groupHeaders := make(map[string]*wui.Button)
@@ -1145,7 +1611,6 @@ func main() {
 	}
 
 	layoutProps = func() {
-		evButtons := []*wui.Button{editOnPaint, editOnClick, editOnDrop}
 		has := make(map[string]bool)
 		for i := range uiProps {
 			if propShown[i] {
@@ -1153,11 +1618,7 @@ func main() {
 			}
 		}
 		has["Font"] = fontShown
-		for i := range evButtons {
-			if evShown[i] {
-				has["Events"] = true
-			}
-		}
+		has["Events"] = eventsShown
 		base := name.Y() + name.Height() + propMargin
 		const headerH = 24
 
@@ -1190,15 +1651,11 @@ func main() {
 					}
 					y += fontProps.Height()
 				case "Events":
-					for i, b := range evButtons {
-						if evShown[i] {
-							if apply {
-								b.SetY(y + 2)
-								b.SetVisible(propsVisible)
-							}
-							y += 30
-						}
+					if apply {
+						evPanel.SetY(y + 2)
+						evPanel.SetVisible(propsVisible)
 					}
+					y += evPanel.Height() + 4
 				default:
 					for i, prop := range uiProps {
 						if propShown[i] && propGroup[i] == g {
@@ -1224,9 +1681,7 @@ func main() {
 			prop.panel.SetVisible(false)
 		}
 		fontProps.SetVisible(false)
-		for _, b := range evButtons {
-			b.SetVisible(false)
-		}
+		evPanel.SetVisible(false)
 		for _, hb := range groupHeaders {
 			hb.SetVisible(false)
 		}
@@ -1240,18 +1695,26 @@ func main() {
 		name.SetText(names[active])
 
 		for i, prop := range uiProps {
-			m, hasProp := reflect.TypeOf(active).MethodByName(prop.setter)
-			show := hasProp && prop.rightType(m.Type.In(1))
-			if show && prop.getter != "" && !isListedProperty(active, prop.getter) {
-				show = false
+			show := false
+			if prop.visibleFor != nil {
+				show = prop.visibleFor(active)
+			} else {
+				m, hasProp := reflect.TypeOf(active).MethodByName(prop.setter)
+				show = hasProp && prop.rightType(m.Type.In(1))
+			}
+			// A property that is not in the property list of the control is
+			// neither saved nor generated, so it is not offered.
+			if show && !prop.isExtra {
+				if !isListedProperty(active, strings.TrimPrefix(prop.setter, "Set")) {
+					show = false
+				}
 			}
 			propShown[i] = show
 		}
 		f, hasFont := active.(fonter)
 		fontShown = hasFont
-		_, isPaintBox := active.(*wui.PaintBox)
-		_, isButton := active.(*wui.Button)
-		evShown = [3]bool{isPaintBox, isButton, true}
+		eventsShown = len(eventsOf(active)) > 0
+		refreshEvents()
 		layoutProps()
 		updateProperties()
 
@@ -1707,6 +2170,7 @@ func main() {
 		names = make(map[interface{}]string)
 		names[theWindow] = "window"
 		events = make(map[event]string)
+		extras = make(map[interface{}]map[string]string)
 		panX, panY = 0, 0
 		activate(theWindow)
 		layoutMain()
@@ -1744,8 +2208,10 @@ func main() {
 		save.SetAppendExt(true)
 		save.AddFilter("Go file", ".go")
 		if accept, path := save.Execute(w); accept {
-			code := generateCode(theWindow, false)
-			err := ioutil.WriteFile(path, code, 0666)
+			code, err := generateCode(theWindow, false)
+			if err == nil {
+				err = ioutil.WriteFile(path, code, 0666)
+			}
 			if err != nil {
 				wui.MessageBoxError("Error", err.Error())
 			} else {
@@ -1793,7 +2259,7 @@ func main() {
 		if cont, ok := active.(wui.Container); ok {
 			target = cont
 		} else {
-			target = active.Parent()
+			target = realParent(theWindow, active)
 		}
 		if target == nil {
 			target = theWindow
@@ -1816,7 +2282,7 @@ func main() {
 	cutMenu.SetOnClick(func() {
 		if copyActive() {
 			c := active.(wui.Control)
-			p := active.Parent()
+			p := realParent(theWindow, active)
 			activate(p)
 			p.Remove(c)
 			preview.Paint()
@@ -1833,7 +2299,7 @@ func main() {
 	duplicateMenu.SetOnClick(func() {
 		if copyActive() {
 			// Paste next to the original, not into the control itself.
-			if p := active.Parent(); p != nil {
+			if p := realParent(theWindow, active); p != nil {
 				activate(p)
 			}
 			pasteClip()
@@ -1846,7 +2312,7 @@ func main() {
 				fmt.Sprintf("Delete '%s'?", names[active]))
 			if result {
 				c := active.(wui.Control)
-				p := active.Parent()
+				p := realParent(theWindow, active)
 				activate(p)
 				p.Remove(c)
 				preview.Paint()
@@ -2030,6 +2496,7 @@ func main() {
 		names = make(map[interface{}]string)
 		names[theWindow] = "window"
 		events = make(map[event]string)
+		extras = make(map[interface{}]map[string]string)
 		panX, panY = 0, 0
 		activate(theWindow)
 		layoutMain()
@@ -2125,6 +2592,8 @@ type drawer interface {
 	TextRectFormat(x, y, w, h int, s string, format wui.Format, color wui.Color)
 	TextExtent(s string) (width, height int)
 	TextOut(x, y int, s string, color wui.Color)
+	DrawImage(img *wui.Image, src wui.Rectangle, destX, destY int)
+	DrawImageScaled(img *wui.Image, src, dest wui.Rectangle)
 	Polygon(p []wui.Point, color wui.Color)
 	SetFont(*wui.Font)
 }
@@ -2174,6 +2643,16 @@ func (d *offsetDrawer) TextExtent(s string) (width, height int) {
 
 func (d *offsetDrawer) TextOut(x, y int, s string, color wui.Color) {
 	d.base.TextOut(x+d.dx, y+d.dy, s, color)
+}
+
+func (d *offsetDrawer) DrawImage(img *wui.Image, src wui.Rectangle, destX, destY int) {
+	d.base.DrawImage(img, src, destX+d.dx, destY+d.dy)
+}
+
+func (d *offsetDrawer) DrawImageScaled(img *wui.Image, src, dest wui.Rectangle) {
+	dest.X += d.dx
+	dest.Y += d.dy
+	d.base.DrawImageScaled(img, src, dest)
 }
 
 func (d *offsetDrawer) Polygon(p []wui.Point, color wui.Color) {
@@ -2240,8 +2719,28 @@ func drawControl(c wui.Control, d drawer) {
 		drawTabControl(x, d)
 	case *wui.DatePicker:
 		drawDatePicker(x, d)
+	case *wui.ListView:
+		drawListView(x, d)
+	case *wui.RichEdit:
+		drawRichEdit(x, d)
+	case *wui.LinkLabel:
+		drawLinkLabel(x, d)
+	case *wui.MonthCalendar:
+		drawMonthCalendar(x, d)
+	case *wui.HotKeyEdit:
+		drawHotKeyEdit(x, d)
+	case *wui.IPAddressEdit:
+		drawIPAddressEdit(x, d)
+	case *wui.ImageView:
+		drawImageView(x, d)
+	case *wui.ScrollPanel:
+		drawScrollPanel(x, d)
+	case *wui.ScrollBar:
+		drawScrollBar(x, d)
+	case *wui.TreeView:
+		drawTreeView(x, d)
 	default:
-		panic("unhandled control type")
+		drawUnknown(c, d)
 	}
 }
 
@@ -2805,8 +3304,12 @@ func showPreview(parent, w *wui.Window, x, y int) {
 		// the preview shown in the designer.
 		oldX, oldY := w.Position()
 		w.SetPosition(x, y)
-		code := generateCode(w, true)
+		code, genErr := generateCode(w, true)
 		w.SetPosition(oldX, oldY)
+		if genErr != nil {
+			wui.MessageBoxError("Error", genErr.Error())
+			return
+		}
 
 		// Write the Go file to our temporary build dir.
 		goFile := filepath.Join(buildDir, "wui_designer_temp_file.go")
@@ -2848,17 +3351,22 @@ func showPreview(parent, w *wui.Window, x, y int) {
 	progress.ShowModal()
 }
 
-func generateCode(w *wui.Window, isPreview bool) []byte {
+func generateCode(w *wui.Window, isPreview bool) ([]byte, error) {
 	// TODO Remove the isPreview parameter once we can set window shortcuts
 	// through the UI and generate them. Once we have that, temporarily add this
 	// shortcut before generating the preview code and reset it afterwards, as
 	// is done with the window position.
 	var code bytes.Buffer
-	code.WriteString(`package main
-
-import "github.com/2dprototype/wui"
-
-func main() {`)
+	var allCode []string
+	for _, c := range events {
+		allCode = append(allCode, c)
+	}
+	imports := goImports(strings.Join(allCode, "\n"))
+	code.WriteString("package main\n\nimport (\n")
+	for _, pkg := range imports {
+		code.WriteString("\t" + strconv.Quote(pkg) + "\n")
+	}
+	code.WriteString("\t\"github.com/2dprototype/wui\"\n)\n\nfunc main() {")
 
 	line := func(format string, a ...interface{}) {
 		fmt.Fprint(&code, "\n")
@@ -2879,9 +3387,9 @@ func main() {`)
 
 	formatted, err := format.Source(code.Bytes())
 	if err != nil {
-		panic("We generated wrong code: " + err.Error())
+		return nil, fmt.Errorf("the generated code is not valid Go, check the event code:\n%v", err)
 	}
-	return formatted
+	return formatted, nil
 }
 
 func writeControl(c interface{}, parentName, name string, line func(format string, a ...interface{})) {
@@ -2919,7 +3427,13 @@ func writeControl(c interface{}, parentName, name string, line func(format strin
 	}
 
 	typeName := reflect.TypeOf(c).Elem().Name()
-	do(" := wui.New%s()", typeName)
+	ctorArgs := ""
+	if typeName == "ScrollBar" {
+		// NewScrollBar takes the orientation, which is set by the Vertical
+		// property afterwards.
+		ctorArgs = "false"
+	}
+	do(" := wui.New%s(%s)", typeName, ctorArgs)
 
 	if fontName != "" {
 		do(".SetFont(%s)", fontName)
@@ -2929,27 +3443,18 @@ func writeControl(c interface{}, parentName, name string, line func(format strin
 	for _, setter := range setters {
 		line("\t" + setter)
 	}
+	for _, setter := range extraGoLines(name, c) {
+		line("\t" + setter)
+	}
 	if parentName != "" {
 		line("%s.Add(%s)", parentName, name)
 	}
 	line("")
 
-	// TODO Generate ALL events.
-	if p, ok := c.(*wui.PaintBox); ok {
-		onPaint := event{p, "OnPaint"}
-		if events[onPaint] != "" {
-			do(".SetOnPaint(%s)", events[onPaint])
+	for _, ev := range eventsOf(c) {
+		if code := events[event{control: c, name: ev}]; !isEmptyHandler(code) {
+			do(".Set"+ev+"(%s)", code)
 		}
-	}
-
-	if _, ok := c.(*wui.Button); ok {
-		onClick := event{c, "OnClick"}
-		if events[onClick] != "" {
-			do(".SetOnClick(%s)", events[onClick])
-		}
-	}
-	if onDrop := (event{c, "OnDropFiles"}); events[onDrop] != "" {
-		do(".SetOnDropFiles(%s)", events[onDrop])
 	}
 
 	if con, ok := c.(wui.Container); ok {
@@ -3002,6 +3507,12 @@ func cloneTree(c wui.Control) wui.Control {
 // cloneControl copies a control including its colors.
 func cloneControl(c wui.Control) wui.Control {
 	n := cloneControlBase(c)
+	copyExtras(n, c)
+	for _, ev := range eventsOf(c) {
+		if code := events[event{control: c, name: ev}]; code != "" {
+			events[event{control: n, name: ev}] = code
+		}
+	}
 	if src, ok := c.(colored); ok {
 		if dst, ok := n.(interface {
 			SetTextColor(wui.Color)
@@ -3127,8 +3638,106 @@ func cloneControlBase(c wui.Control) wui.Control {
 		p.SetBounds(0, 0, x.Width(), x.Height())
 		return p
 	default:
-		panic("unhandled control type in cloneControl")
+		return cloneByProperties(c)
 	}
+}
+
+// cloneByProperties copies the controls that have no case in cloneControlBase
+// with the property list of their type. The extra properties are copied by
+// cloneControl.
+func cloneByProperties(c wui.Control) wui.Control {
+	var n wui.Control
+	switch c.(type) {
+	case *wui.ListView:
+		n = wui.NewListView()
+	case *wui.RichEdit:
+		n = wui.NewRichEdit()
+	case *wui.LinkLabel:
+		n = wui.NewLinkLabel()
+	case *wui.MonthCalendar:
+		n = wui.NewMonthCalendar()
+	case *wui.HotKeyEdit:
+		n = wui.NewHotKeyEdit()
+	case *wui.IPAddressEdit:
+		n = wui.NewIPAddressEdit()
+	case *wui.ImageView:
+		n = wui.NewImageView()
+	case *wui.ScrollPanel:
+		n = wui.NewScrollPanel()
+	case *wui.ScrollBar:
+		n = wui.NewScrollBar(false)
+	case *wui.TreeView:
+		n = wui.NewTreeView()
+	default:
+		panic("unhandled control type in cloneControl: " + typeNameOf(c))
+	}
+	_, _, w, h := c.Bounds()
+	n.SetBounds(0, 0, w, h)
+	copyProperties(n, c)
+	return n
+}
+
+// copyProperties copies the properties of the property list that differ from
+// their default. Position, anchors, colors, enabled and visible are copied by
+// cloneTree and cloneControl.
+func copyProperties(dst, src interface{}) {
+	var def interface{}
+	var list []property
+	for d, props := range properties {
+		if reflect.TypeOf(src) == reflect.TypeOf(d) {
+			def, list = d, props
+			break
+		}
+	}
+	for _, p := range list {
+		if len(p.combines) > 0 || p.skipDefault || savedByBounds[p.name] {
+			continue
+		}
+		switch p.name {
+		case "Enabled", "Visible", "HorizontalAnchor", "VerticalAnchor":
+			continue
+		}
+		if hasDefaultValue(src, def, p.name) {
+			continue
+		}
+		get := reflect.ValueOf(src).MethodByName(p.name)
+		set := reflect.ValueOf(dst).MethodByName("Set" + p.name)
+		if !get.IsValid() || !set.IsValid() || get.Type().NumOut() != 1 || set.Type().NumIn() != 1 {
+			continue
+		}
+		out := get.Call(nil)[0]
+		if !out.Type().AssignableTo(set.Type().In(0)) {
+			continue
+		}
+		set.Call([]reflect.Value{out})
+	}
+}
+
+// realParent returns the container that holds the control in the design. A
+// control inside of a ScrollPanel reports the Panel that is embedded in the
+// ScrollPanel as its parent, this returns the ScrollPanel itself.
+func realParent(root wui.Container, c node) wui.Container {
+	p := c.Parent()
+	if pp, ok := p.(*wui.Panel); ok {
+		if sp := findScrollPanel(root, pp); sp != nil {
+			return sp
+		}
+	}
+	return p
+}
+
+func findScrollPanel(c wui.Container, pp *wui.Panel) *wui.ScrollPanel {
+	for _, child := range c.Children() {
+		if sp, ok := child.(*wui.ScrollPanel); ok && &sp.Panel == pp {
+			return sp
+		}
+		if con, ok := child.(wui.Container); ok {
+			if r := findScrollPanel(con, pp); r != nil {
+				return r
+			}
+		}
+	}
+	return nil
 }
 
 type enabler interface {

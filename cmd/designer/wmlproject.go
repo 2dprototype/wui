@@ -26,7 +26,23 @@ import (
 // projectExt is the file extension of designer projects.
 const projectExt = ".wml"
 
-const eventBlockStart = "<!-- wui-designer:events"
+const (
+	eventBlockStart = "<!-- wui-designer:events"
+	propsBlockStart = "<!-- wui-designer:props"
+)
+
+// customTypes are the controls that WML does not know. They are saved as a
+// Panel at the same place, and the real type is noted in the props block under
+// the key "<name>:Type". Loading the file in the designer brings the real
+// control back, an application that loads it with package wml sees a Panel.
+var customTypes = map[string]func() wui.Control{
+	"TreeView": func() wui.Control { return wui.NewTreeView() },
+}
+
+func isCustomControl(c interface{}) bool {
+	_, ok := customTypes[typeNameOf(c)]
+	return ok
+}
 
 // savedByBounds are the properties that are not written one by one: controls
 // are saved with Bounds and the window with InnerSize.
@@ -38,14 +54,16 @@ var savedByBounds = map[string]bool{
 // saveProject writes the window with all its controls and event code as a WML
 // file.
 func saveProject(w *wui.Window, filePath string) error {
-	doc, codes, err := buildDocument(w)
+	doc, codes, props, err := buildDocument(w)
 	if err != nil {
 		return err
 	}
 	if err := doc.Validate(); err != nil {
 		return fmt.Errorf("the project cannot be written as WML:\n%s", describeError(err))
 	}
-	data := appendEventBlock(doc.Marshal(), codes)
+	data := appendBlock(doc.Marshal(), propsBlockStart,
+		"Properties that WML cannot store. Lines starting with @ name a key, lines starting with | are its value.", props)
+	data = appendEventBlock(data, codes)
 	return ioutil.WriteFile(filePath, data, 0666)
 }
 
@@ -83,7 +101,11 @@ func loadProject(filePath string) (window *wui.Window, notice string, err error)
 	// Only now, when everything worked, replace the state of the designer.
 	names = make(map[interface{}]string)
 	events = make(map[event]string)
-	registerNode(first, view, parseEventBlock(raw))
+	extras = make(map[interface{}]map[string]string)
+	codes := parseEventBlock(raw)
+	props := parseBlock(raw, propsBlockStart)
+	registerNode(first, view, codes, props)
+	upgradeCustom(window, codes, props)
 	if names[window] == "" {
 		names[window] = "window"
 	}
@@ -101,8 +123,9 @@ func describeError(err error) string {
 	return err.Error()
 }
 
-// registerNode records the names and the event code of the built objects.
-func registerNode(n *wml.Node, view *wml.View, codes map[string]string) {
+// registerNode records the names, the extra properties and the event code of
+// the built objects.
+func registerNode(n *wml.Node, view *wml.View, codes, props map[string]string) {
 	if name, ok := n.Attr("Name"); ok {
 		if obj, found := view.Lookup(name); found {
 			names[obj] = name
@@ -117,10 +140,112 @@ func registerNode(n *wml.Node, view *wml.View, codes map[string]string) {
 					}
 				}
 			}
+			loadExtras(obj, n, name, props)
 		}
 	}
 	for _, child := range n.Children {
-		registerNode(child, view, codes)
+		registerNode(child, view, codes, props)
+	}
+}
+
+// loadExtras reads the extra properties of one element.
+func loadExtras(obj interface{}, n *wml.Node, name string, props map[string]string) {
+	for _, spec := range extrasOf(typeNameOf(obj)) {
+		if ps := wmlPropFor(n.Type, spec); ps != nil {
+			if spec.kind == exList {
+				var items []string
+				for _, c := range n.Children {
+					if c.Type == ps.Elem {
+						items = append(items, strings.Replace(c.Text, "\n", " ", -1))
+					}
+				}
+				if len(items) > 0 {
+					setExtra(obj, spec, strings.Join(items, "\n"))
+				}
+			} else if v, ok := n.Attr(spec.name); ok {
+				setExtra(obj, spec, v)
+			}
+			continue
+		}
+		if v, ok := props[name+"."+spec.name]; ok {
+			setExtra(obj, spec, v)
+		}
+	}
+}
+
+// upgradeCustom replaces the Panels that stand for controls WML does not
+// know by the real controls.
+func upgradeCustom(c wui.Container, codes, props map[string]string) {
+	for _, child := range append([]wui.Control(nil), c.Children()...) {
+		if p, ok := child.(*wui.Panel); ok {
+			name := names[p]
+			if newCtl := customNew(props[name+":Type"]); name != "" && newCtl != nil {
+				x, y, w, h := p.Bounds()
+				newCtl.SetBounds(x, y, w, h)
+				ha, va := p.Anchors()
+				newCtl.SetHorizontalAnchor(ha)
+				newCtl.SetVerticalAnchor(va)
+				if dst, ok := newCtl.(enabler); ok {
+					dst.SetEnabled(p.Enabled())
+				}
+				if dst, ok := newCtl.(visibler); ok {
+					dst.SetVisible(p.Visible())
+				}
+				if dst, ok := newCtl.(fonter); ok && p.Font() != nil {
+					dst.SetFont(p.Font())
+				}
+				delete(names, p)
+				names[newCtl] = name
+				copyExtras(newCtl, p)
+				delete(extras, p)
+				// Extras that were stored for a Panel are replaced by the
+				// ones of the real type.
+				for _, spec := range extrasOf(typeNameOf(newCtl)) {
+					if v, ok := props[name+"."+spec.name]; ok {
+						setExtra(newCtl, spec, v)
+					}
+				}
+				for _, ev := range eventsOf(newCtl) {
+					if code, ok := codes[name+"_"+ev]; ok && strings.TrimSpace(code) != "" {
+						events[event{control: newCtl, name: ev}] = code
+					}
+				}
+				replaceChild(c, p, newCtl)
+				continue
+			}
+		}
+		if con, ok := child.(wui.Container); ok {
+			upgradeCustom(con, codes, props)
+		}
+	}
+}
+
+func customNew(typeName string) wui.Control {
+	if f, ok := customTypes[typeName]; ok {
+		return f()
+	}
+	return nil
+}
+
+// replaceChild puts repl at the place of old in the children of parent.
+func replaceChild(parent wui.Container, old, repl wui.Control) {
+	children := append([]wui.Control(nil), parent.Children()...)
+	idx := -1
+	for i, ch := range children {
+		if ch == old {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	for _, ch := range children[idx:] {
+		parent.Remove(ch)
+	}
+	parent.Add(repl)
+	for _, ch := range children[idx+1:] {
+		parent.Add(ch)
 	}
 }
 
@@ -140,20 +265,21 @@ func nameAll(c wui.Container) {
 
 type docBuilder struct {
 	codes    map[string]string // handler name -> Go code
+	props    map[string]string // properties for the designer comment block
 	seen     map[string]bool
 	problems []string
 }
 
-func buildDocument(w *wui.Window) (*wml.Document, map[string]string, error) {
+func buildDocument(w *wui.Window) (*wml.Document, map[string]string, map[string]string, error) {
 	if names[w] == "" {
 		names[w] = "window"
 	}
-	b := &docBuilder{codes: make(map[string]string), seen: make(map[string]bool)}
+	b := &docBuilder{codes: make(map[string]string), props: make(map[string]string), seen: make(map[string]bool)}
 	root := b.node(w, "Window")
 	if len(b.problems) > 0 {
-		return nil, nil, fmt.Errorf("the project cannot be saved:\n%s", strings.Join(b.problems, "\n"))
+		return nil, nil, nil, fmt.Errorf("the project cannot be saved:\n%s", strings.Join(b.problems, "\n"))
 	}
-	return wml.NewDocument(root), b.codes, nil
+	return wml.NewDocument(root), b.codes, b.props, nil
 }
 
 func (b *docBuilder) problem(format string, args ...interface{}) {
@@ -163,8 +289,13 @@ func (b *docBuilder) problem(format string, args ...interface{}) {
 }
 
 func (b *docBuilder) node(c interface{}, typeName string) *wml.Node {
-	n := &wml.Node{Type: typeName}
-	spec := wml.Lookup(typeName)
+	wmlType := typeName
+	custom := isCustomControl(c)
+	if custom {
+		wmlType = "Panel"
+	}
+	n := &wml.Node{Type: wmlType}
+	spec := wml.Lookup(wmlType)
 	if spec == nil {
 		b.problem("%s is not supported by WML", typeName)
 		return n
@@ -183,6 +314,9 @@ func (b *docBuilder) node(c interface{}, typeName string) *wml.Node {
 	}
 	b.seen[name] = true
 	n.SetAttr("Name", name)
+	if custom {
+		b.props[name+":Type"] = typeName
+	}
 
 	// Size and position first. A window is saved by its inner size only: the
 	// position on the screen does not belong into a layout.
@@ -244,14 +378,40 @@ func (b *docBuilder) node(c interface{}, typeName string) *wml.Node {
 	}
 
 	// Events: the attribute names the handler, the code goes into the comment.
-	for _, ev := range spec.Events {
+	evList := spec.Events
+	if custom {
+		evList = eventsOf(c)
+	}
+	for _, ev := range evList {
 		code := events[event{control: c, name: ev}]
 		if isEmptyHandler(code) {
 			continue
 		}
 		handler := name + "_" + ev
-		n.SetAttr(ev, handler)
+		if !custom {
+			n.SetAttr(ev, handler)
+		}
 		b.codes[handler] = code
+	}
+
+	// Extra properties: attributes where WML has the property, otherwise the
+	// designer comment block.
+	for _, ex := range extrasOf(typeName) {
+		v := getExtra(c, ex)
+		if v == ex.def {
+			continue
+		}
+		ps := wmlPropFor(wmlType, ex)
+		switch {
+		case ps == nil:
+			b.props[name+"."+ex.name] = v
+		case ex.kind == exList:
+			for _, item := range strings.Split(v, "\n") {
+				lists = append(lists, &wml.Node{Type: ps.Elem, Text: item})
+			}
+		default:
+			n.SetAttr(ex.name, v)
+		}
 	}
 
 	if f, ok := c.(fonter); ok {
@@ -391,25 +551,37 @@ func unescapeComment(s string) string {
 //	| }
 //	-->
 func appendEventBlock(data []byte, codes map[string]string) []byte {
-	if len(codes) == 0 {
+	return appendBlock(data, eventBlockStart,
+		"Go code of the event handlers. Lines starting with @ name a handler, lines starting with | are its code.", codes)
+}
+
+// parseEventBlock reads the event code written by appendEventBlock.
+func parseEventBlock(raw []byte) map[string]string {
+	return parseBlock(raw, eventBlockStart)
+}
+
+// appendBlock inserts a comment block with the given values before the
+// closing </wml>.
+func appendBlock(data []byte, start, help string, values map[string]string) []byte {
+	if len(values) == 0 {
 		return data
 	}
 	end := bytes.LastIndex(data, []byte("</wml>"))
 	if end < 0 {
 		return data
 	}
-	keys := make([]string, 0, len(codes))
-	for k := range codes {
+	keys := make([]string, 0, len(values))
+	for k := range values {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	var b bytes.Buffer
-	b.WriteString("  " + eventBlockStart + "\n")
-	b.WriteString("  Go code of the event handlers. Lines starting with @ name a handler, lines starting with | are its code.\n")
+	b.WriteString("  " + start + "\n")
+	b.WriteString("  " + help + "\n")
 	for _, k := range keys {
 		b.WriteString("@ " + k + "\n")
-		for _, line := range strings.Split(strings.Replace(codes[k], "\r", "", -1), "\n") {
+		for _, line := range strings.Split(strings.Replace(values[k], "\r", "", -1), "\n") {
 			b.WriteString("| " + escapeComment(line) + "\n")
 		}
 	}
@@ -422,15 +594,15 @@ func appendEventBlock(data []byte, codes map[string]string) []byte {
 	return out
 }
 
-// parseEventBlock reads the event code written by appendEventBlock.
-func parseEventBlock(raw []byte) map[string]string {
+// parseBlock reads the values of the comment block that starts with start.
+func parseBlock(raw []byte, start string) map[string]string {
 	codes := make(map[string]string)
 	s := string(raw)
-	i := strings.Index(s, eventBlockStart)
+	i := strings.Index(s, start)
 	if i < 0 {
 		return codes
 	}
-	s = s[i+len(eventBlockStart):]
+	s = s[i+len(start):]
 	j := strings.Index(s, "-->")
 	if j < 0 {
 		return codes

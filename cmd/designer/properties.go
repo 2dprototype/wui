@@ -53,6 +53,29 @@ func commonPropertiesPlus(plus ...property) []property {
 			prop("Height"),
 			prop("Size", "Width", "Height"),
 			prop("Bounds", "Position", "Size"),
+			prop("TabStop"),
+		},
+		plus...)
+}
+
+// scrollBarProperties are the common properties without Position: a ScrollBar
+// has its own Position (the scroll position) that replaces the one of the
+// other controls.
+func scrollBarProperties(plus ...property) []property {
+	return append(
+		[]property{
+			prop("Enabled"),
+			prop("Visible"),
+			prop("HorizontalAnchor"),
+			prop("VerticalAnchor"),
+			prop("Anchors", "HorizontalAnchor", "VerticalAnchor"),
+			prop("X"),
+			prop("Y"),
+			prop("Width"),
+			prop("Height"),
+			prop("Size", "Width", "Height"),
+			prop("Bounds", "X", "Y", "Size"),
+			prop("TabStop"),
 		},
 		plus...)
 }
@@ -93,6 +116,7 @@ var properties = map[interface{}][]property{
 		prop("TrayToolTip"),
 		prop("MinimizeToTray"),
 		prop("CloseToTray"),
+		prop("CenterOnShow"),
 	},
 
 	wui.NewButton(): commonPropertiesPlus(
@@ -109,6 +133,7 @@ var properties = map[interface{}][]property{
 	wui.NewCheckBox(): commonPropertiesPlus(
 		prop("Text"),
 		prop("Checked"),
+		prop("ThreeState"),
 		propColor("TextColor"),
 		propColor("BackgroundColor"),
 	),
@@ -141,10 +166,12 @@ var properties = map[interface{}][]property{
 	wui.NewSlider(): commonPropertiesPlus(
 		prop("ArrowIncrement"),
 		prop("MouseIncrement"),
-		prop("CursorPosition"),
+		// The range comes before the cursor position, which is clamped to
+		// the range when it is set.
 		prop("Min"),
 		prop("Max"),
 		prop("MinMax", "Min", "Max"),
+		prop("CursorPosition"),
 		prop("Orientation"),
 		prop("TickFrequency"),
 		prop("TickPosition"),
@@ -168,13 +195,14 @@ var properties = map[interface{}][]property{
 	),
 
 	wui.NewIntUpDown(): commonPropertiesPlus(
-		prop("Value"),
 		prop("Min"),
 		prop("Max"),
 		prop("MinMax", "Min", "Max"),
+		prop("Value"),
 	),
 
 	wui.NewComboBox(): commonPropertiesPlus(
+		prop("Editable"),
 		prop("Items"),
 		prop("SelectedIndex"),
 		propColor("TextColor"),
@@ -184,15 +212,16 @@ var properties = map[interface{}][]property{
 	wui.NewProgressBar(): commonPropertiesPlus(
 		prop("Vertical"),
 		prop("MovesForever"),
+		prop("State"),
 		prop("Value"),
 	),
 
 	wui.NewFloatUpDown(): commonPropertiesPlus(
-		prop("Value"),
 		prop("Min"),
 		prop("Max"),
 		prop("MinMax", "Min", "Max"),
 		prop("Precision"),
+		prop("Value"),
 	),
 
 	wui.NewTextEdit(): commonPropertiesPlus(
@@ -200,9 +229,45 @@ var properties = map[interface{}][]property{
 		prop("WordWrap"),
 		prop("CharacterLimit"),
 		prop("WritesTabs"),
+		prop("ReadOnly"),
 		propColor("TextColor"),
 		propColor("BackgroundColor"),
 	),
+
+	wui.NewListView(): commonPropertiesPlus(
+		prop("View"),
+		prop("MultiSelect"),
+	),
+
+	wui.NewRichEdit(): commonPropertiesPlus(
+		prop("Text"),
+		prop("ReadOnly"),
+	),
+
+	wui.NewLinkLabel(): commonPropertiesPlus(
+		prop("Text"),
+	),
+
+	wui.NewMonthCalendar(): commonPropertiesPlus(),
+
+	wui.NewHotKeyEdit(): commonPropertiesPlus(),
+
+	wui.NewIPAddressEdit(): commonPropertiesPlus(),
+
+	wui.NewImageView(): commonPropertiesPlus(
+		prop("Mode"),
+	),
+
+	wui.NewScrollPanel(): commonPropertiesPlus(
+		prop("BorderStyle"),
+		propColor("BackgroundColor"),
+	),
+
+	wui.NewScrollBar(false): scrollBarProperties(),
+
+	// The TreeView is not known to WML. The designer saves it as a Panel with
+	// a note in the designer comment block, see wmlproject.go.
+	wui.NewTreeView(): commonPropertiesPlus(),
 }
 
 func generateProperties(variable string, control interface{}) []string {
